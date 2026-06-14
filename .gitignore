@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+
+# Node / Next.js
+node_modules/
+.next/
+frontend/out/
+
+# Runtime artefacts
+backend/uploads/
+backend/results/
+backend/outputs/
+*.log
+
+# Env
+.env
+.env.local
+
+# OS
+.DS_Store
+
+# NOTE: the locked checkpoint (model-best.pth, public) IS tracked deliberately so the
+# image/demo is self-contained — do not add *.pth here.
+# NEVER add any MeerLICHT imagery; demo data is public DECam only.
