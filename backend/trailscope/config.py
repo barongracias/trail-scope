@@ -85,6 +85,18 @@ CHECKPOINT_PATH = Path(
 UPLOAD_DIR = Path(os.getenv("TRAILSCOPE_UPLOAD_DIR", str(_BACKEND_DIR / "uploads")))
 RESULTS_DIR = Path(os.getenv("TRAILSCOPE_RESULTS_DIR", str(_BACKEND_DIR / "results")))
 
+# --------------------------------------------------------------------------------------
+# Operational settings (v1.1+; env-overridable — NOT locked invariants)
+# --------------------------------------------------------------------------------------
+# Per-result dirs are cleared on startup and also swept by age on each request.
+RESULTS_TTL_SECONDS = int(os.getenv("TRAILSCOPE_RESULTS_TTL", "3600"))
+# CPU inference is serial-ish; cap concurrent /infer runs and reject the overflow (429).
+MAX_CONCURRENT_INFER = int(os.getenv("TRAILSCOPE_MAX_CONCURRENT_INFER", "2"))
+# Best-effort cache: identical (file bytes + options) → reuse the existing result dir.
+DEMO_CACHE_SIZE = int(os.getenv("TRAILSCOPE_DEMO_CACHE_SIZE", "64"))
+# Longest display edge for the "as uploaded" preview (downsized for transport only).
+PREVIEW_MAX_EDGE = 1200
+
 
 def sha256_file(path: str | Path) -> str:
     """Stream a SHA-256 over a file (1 MiB chunks)."""

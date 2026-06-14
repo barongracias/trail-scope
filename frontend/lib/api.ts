@@ -29,6 +29,15 @@ export type PredictedComponent = {
   orientation_deg: number | null;
 };
 
+export type ResultFile =
+  | "input_8bit.png"
+  | "mask.png"
+  | "overlay.png"
+  | "prob.png"
+  | "original_preview.png"
+  | "stats.json"
+  | "bundle.zip";
+
 export type InferStats = {
   qualitative_only: boolean;
   benchmark: boolean;
@@ -39,6 +48,7 @@ export type InferStats = {
   tier: Tier;
   warnings: string[];
   provenance: Provenance;
+  artifacts: string[];
   image: { input_shape: number[]; processed_shape: number[]; n_patches: number };
   model_output: {
     predicted_mask_pixel_count: number;
@@ -122,9 +132,26 @@ export async function infer(
   return handle<InferResponse>(res);
 }
 
+export type FitsHdu = {
+  index: number;
+  type: string;
+  shape: number[] | null;
+  is_2d_image: boolean;
+};
+
+export async function inspectFits(
+  file: File,
+  baseUrl: string = API_BASE_URL,
+): Promise<{ hdus: FitsHdu[] }> {
+  const form = new FormData();
+  form.append("file", file);
+  const res = await fetch(`${baseUrl}/inspect`, { method: "POST", body: form });
+  return handle<{ hdus: FitsHdu[] }>(res);
+}
+
 export function resultUrl(
   resultId: string,
-  filename: "input_8bit.png" | "mask.png" | "overlay.png" | "stats.json",
+  filename: ResultFile,
   baseUrl: string = API_BASE_URL,
 ): string {
   return `${baseUrl}/results/${resultId}/${filename}`;

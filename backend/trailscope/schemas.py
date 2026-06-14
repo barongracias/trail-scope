@@ -93,6 +93,7 @@ class InferStats(BaseModel):
     tier: str
     warnings: list[str]
     provenance: Provenance
+    artifacts: list[str] = []          # per-result filenames available under /results/{id}
     image: ImageStats
     model_output: ModelOutput
     hough: HoughStats
@@ -102,3 +103,14 @@ class InferStats(BaseModel):
 class InferResponse(BaseModel):
     result_id: str
     stats: InferStats
+
+
+class FitsHdu(BaseModel):
+    index: int
+    type: str
+    shape: Optional[list[int]]
+    is_2d_image: bool
+
+
+class InspectResponse(BaseModel):
+    hdus: list[FitsHdu]

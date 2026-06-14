@@ -1,18 +1,20 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { AlertTriangle, Download, Loader2, Upload } from "lucide-react";
+import { AlertTriangle, Copy, Download, Loader2, Upload } from "lucide-react";
 import {
   ApiError,
+  type FitsHdu,
   type InferResponse,
   type Tier,
   healthCheck,
   infer,
+  inspectFits,
   resultUrl,
 } from "@/lib/api";
-import CanvasCompare from "./CanvasCompare";
+import CanvasCompare, { type ProbHover } from "./CanvasCompare";
+import CropView from "./CropView";
 
-// Locked, non-tunable model facts (constants, never knobs).
 const MODEL_CARD = [
   ["Model", "Locked thesis U-Net"],
   ["Threshold", "0.45"],
@@ -29,36 +31,35 @@ const DISCLAIMER =
 const ACCEPTED = ".fits, .fit, .fits.fz, .png, .jpg, .jpeg, .tif";
 
 const TIER_TEXT: Record<Tier, string> = {
-  in_domain_like:
-    "In-domain-like input — an 8-bit display image at a plausible scale.",
+  in_domain_like: "In-domain-like input — an 8-bit display image at a plausible scale.",
   recipe_matched:
     "Recipe-matched input — FITS with a header-resolved pixel scale (the validated DECam-style recipe).",
-  best_effort:
-    "Best-effort input — outside the validated recipe (e.g. unknown pixel scale).",
+  best_effort: "Best-effort input — outside the validated recipe (e.g. unknown pixel scale).",
 };
+const TIER_DEFS =
+  "in_domain_like: 8-bit display image at a plausible scale.\nrecipe_matched: FITS with a header-resolved pixel scale (the validated DECam recipe).\nbest_effort: everything else (e.g. unknown pixel scale — the model is not scale-invariant).";
 
-// Small cropped 8-bit PNG examples derived from the public DECam frames (NOIRLab).
-const DEMOS = [
-  { label: "DECam — NAVSTAR-70 (crop)", file: "decam_navstar70_crop.png" },
-];
+const DEMOS = [{ label: "DECam — NAVSTAR-70 (crop)", file: "decam_navstar70_crop.png" }];
 
 type Phase = "input" | "processing" | "output";
 
-function fmt(n: number, digits = 0): string {
-  return n.toLocaleString(undefined, {
-    minimumFractionDigits: digits,
-    maximumFractionDigits: digits,
-  });
-}
+const fmt = (n: number, digits = 0) =>
+  n.toLocaleString(undefined, { minimumFractionDigits: digits, maximumFractionDigits: digits });
+
+const isRaster = (f: File | null) => !!f && /\.(png|jpe?g)$/i.test(f.name);
+const isFits = (f: File | null) => !!f && /\.(fits|fit|fits\.fz|fz)$/i.test(f.name);
 
 export default function Page() {
   const [phase, setPhase] = useState<Phase>("input");
   const [file, setFile] = useState<File | null>(null);
   const [hough, setHough] = useState(true);
-  const [pixelScale, setPixelScale] = useState<string>("");
-  const [hduIndex, setHduIndex] = useState<string>("");
+  const [pixelScale, setPixelScale] = useState("");
+  const [hduIndex, setHduIndex] = useState("");
+  const [hduList, setHduList] = useState<FitsHdu[] | null>(null);
   const [dragging, setDragging] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [reject413, setReject413] = useState<string | null>(null);
+  const [cropping, setCropping] = useState(false);
   const [stage, setStage] = useState("Preparing image");
   const [result, setResult] = useState<InferResponse | null>(null);
   const [backendDown, setBackendDown] = useState(false);
@@ -66,36 +67,61 @@ export default function Page() {
   // Output overlay controls.
   const [showMask, setShowMask] = useState(true);
   const [showHough, setShowHough] = useState(true);
+  const [showProb, setShowProb] = useState(false);
   const [opacity, setOpacity] = useState(0.85);
+  const [highlight, setHighlight] = useState<number | null>(null);
+  const [probHover, setProbHover] = useState<ProbHover>(null);
+  const [compareHough, setCompareHough] = useState(false);
+  const [copied, setCopied] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const stageTimers = useRef<number[]>([]);
 
   useEffect(() => {
-    healthCheck()
-      .then((h) => setBackendDown(!h.model_sha_ok))
-      .catch(() => setBackendDown(true));
+    healthCheck().then((h) => setBackendDown(!h.model_sha_ok)).catch(() => setBackendDown(true));
   }, []);
 
-  const pickDemo = async (demoFile: string, label: string) => {
+  // Paste-from-clipboard upload.
+  useEffect(() => {
+    const onPaste = (e: ClipboardEvent) => {
+      const f = e.clipboardData?.files?.[0];
+      if (f) chooseFile(f);
+    };
+    window.addEventListener("paste", onPaste);
+    return () => window.removeEventListener("paste", onPaste);
+  }, []);
+
+  const chooseFile = (f: File | null) => {
+    setFile(f);
     setError(null);
+    setReject413(null);
+    setCropping(false);
+    setHduList(null);
+    setHduIndex("");
+    if (f && isFits(f)) {
+      inspectFits(f)
+        .then((r) => setHduList(r.hdus))
+        .catch(() => setHduList(null));
+    }
+  };
+
+  const pickDemo = async (demoFile: string, label: string) => {
     try {
       const res = await fetch(`/demo/${demoFile}`);
       if (!res.ok) throw new Error("Demo asset not found");
-      const blob = await res.blob();
-      setFile(new File([blob], demoFile, { type: "image/png" }));
+      chooseFile(new File([await res.blob()], demoFile, { type: "image/png" }));
     } catch {
       setError(`Could not load demo "${label}".`);
     }
   };
 
-  const onRun = async () => {
-    if (!file) return;
+  const run = async (runFile: File) => {
     setError(null);
+    setReject413(null);
     setResult(null);
     setShowHough(hough);
+    setHighlight(null);
     setPhase("processing");
-    // Honest staged text (the request is synchronous; these are indicative).
     setStage("Preparing image");
     stageTimers.current.forEach(clearTimeout);
     stageTimers.current = [
@@ -103,7 +129,7 @@ export default function Page() {
       window.setTimeout(() => setStage("Rendering outputs"), 2500),
     ];
     try {
-      const res = await infer(file, {
+      const res = await infer(runFile, {
         hough,
         pixelScaleArcsec: pixelScale ? Number(pixelScale) : null,
         hduIndex: hduIndex ? Number(hduIndex) : null,
@@ -111,9 +137,13 @@ export default function Page() {
       setResult(res);
       setPhase("output");
     } catch (e) {
-      const msg =
-        e instanceof ApiError ? e.message : "Inference failed. Please try again.";
-      setError(msg);
+      const apiErr = e instanceof ApiError ? e : null;
+      if (apiErr?.status === 413) {
+        setReject413(apiErr.message);
+        setCropping(isRaster(runFile));
+      } else {
+        setError(apiErr ? apiErr.message : "Inference failed. Please try again.");
+      }
       setPhase("input");
     } finally {
       stageTimers.current.forEach(clearTimeout);
@@ -124,6 +154,7 @@ export default function Page() {
     setResult(null);
     setFile(null);
     setError(null);
+    setReject413(null);
     setPhase("input");
   };
 
@@ -137,28 +168,33 @@ export default function Page() {
       {backendDown && (
         <div className="mb-4 flex items-start gap-2 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800">
           <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
-          <span>
-            The backend is unreachable or its checkpoint failed the integrity gate.
-            Inference is disabled.
-          </span>
+          <span>The backend is unreachable or its checkpoint failed the integrity gate. Inference is disabled.</span>
         </div>
       )}
 
       {phase === "input" && (
         <InputView
           file={file}
-          setFile={setFile}
+          chooseFile={chooseFile}
           hough={hough}
           setHough={setHough}
           pixelScale={pixelScale}
           setPixelScale={setPixelScale}
           hduIndex={hduIndex}
           setHduIndex={setHduIndex}
+          hduList={hduList}
           dragging={dragging}
           setDragging={setDragging}
           fileInputRef={fileInputRef}
           error={error}
-          onRun={onRun}
+          reject413={reject413}
+          cropping={cropping}
+          setCropping={setCropping}
+          onRun={() => file && run(file)}
+          onCropped={(f) => {
+            setFile(f);
+            run(f);
+          }}
           pickDemo={pickDemo}
         />
       )}
@@ -172,8 +208,18 @@ export default function Page() {
           setShowMask={setShowMask}
           showHough={showHough}
           setShowHough={setShowHough}
+          showProb={showProb}
+          setShowProb={setShowProb}
           opacity={opacity}
           setOpacity={setOpacity}
+          highlight={highlight}
+          setHighlight={setHighlight}
+          probHover={probHover}
+          setProbHover={setProbHover}
+          compareHough={compareHough}
+          setCompareHough={setCompareHough}
+          copied={copied}
+          setCopied={setCopied}
           onReset={reset}
         />
       )}
@@ -181,10 +227,9 @@ export default function Page() {
       <footer className="mt-10 border-t border-slate-200 pt-4 text-xs text-slate-500">
         <p className="font-medium text-slate-600">{DISCLAIMER}</p>
         <p className="mt-1">
-          Demo data: public DECam frames. Based on observations at Cerro Tololo
-          Inter-American Observatory, NSF&apos;s NOIRLab. No MeerLICHT imagery is
-          distributed. Stats use &quot;predicted mask/component&quot; language and make no
-          accuracy claims.
+          Demo data: public DECam frames. Based on observations at Cerro Tololo Inter-American
+          Observatory, NSF&apos;s NOIRLab. No MeerLICHT imagery is distributed. Stats use
+          &quot;predicted mask/component&quot; language and make no accuracy claims.
         </p>
       </footer>
     </main>
@@ -201,24 +246,41 @@ function Card({ children, className = "" }: { children: React.ReactNode; classNa
 
 function InputView(props: {
   file: File | null;
-  setFile: (f: File | null) => void;
+  chooseFile: (f: File | null) => void;
   hough: boolean;
   setHough: (b: boolean) => void;
   pixelScale: string;
   setPixelScale: (s: string) => void;
   hduIndex: string;
   setHduIndex: (s: string) => void;
+  hduList: FitsHdu[] | null;
   dragging: boolean;
   setDragging: (b: boolean) => void;
   fileInputRef: React.RefObject<HTMLInputElement>;
   error: string | null;
+  reject413: string | null;
+  cropping: boolean;
+  setCropping: (b: boolean) => void;
   onRun: () => void;
+  onCropped: (f: File) => void;
   pickDemo: (f: string, label: string) => void;
 }) {
   const {
-    file, setFile, hough, setHough, pixelScale, setPixelScale, hduIndex, setHduIndex,
-    dragging, setDragging, fileInputRef, error, onRun, pickDemo,
+    file, chooseFile, hough, setHough, pixelScale, setPixelScale, hduIndex, setHduIndex,
+    hduList, dragging, setDragging, fileInputRef, error, reject413, cropping, setCropping,
+    onRun, onCropped, pickDemo,
   } = props;
+
+  if (cropping && file) {
+    return (
+      <Card>
+        <div className="mb-3 rounded-lg border border-amber-300 bg-amber-50 px-4 py-2 text-sm text-amber-800">
+          {reject413}
+        </div>
+        <CropView file={file} onCropped={onCropped} onCancel={() => setCropping(false)} />
+      </Card>
+    );
+  }
 
   return (
     <div className="space-y-5">
@@ -232,7 +294,7 @@ function InputView(props: {
           onDrop={(e) => {
             e.preventDefault();
             setDragging(false);
-            if (e.dataTransfer.files?.[0]) setFile(e.dataTransfer.files[0]);
+            if (e.dataTransfer.files?.[0]) chooseFile(e.dataTransfer.files[0]);
           }}
           onClick={() => fileInputRef.current?.click()}
           className={`flex cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed px-6 py-10 text-center transition ${
@@ -241,7 +303,7 @@ function InputView(props: {
         >
           <Upload className="mb-2 h-7 w-7 text-slate-400" />
           <p className="text-sm font-medium text-slate-700">
-            {file ? file.name : "Drag an image here, or click to browse"}
+            {file ? file.name : "Drag an image here, click to browse, or paste from clipboard"}
           </p>
           <p className="mt-1 text-xs text-slate-500">Accepted: {ACCEPTED} · 64 MB max</p>
           <input
@@ -249,7 +311,7 @@ function InputView(props: {
             type="file"
             className="hidden"
             accept=".fits,.fit,.fz,.png,.jpg,.jpeg,.tif,.tiff"
-            onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+            onChange={(e) => chooseFile(e.target.files?.[0] ?? null)}
           />
         </div>
 
@@ -284,23 +346,35 @@ function InputView(props: {
           </label>
           <label className="flex flex-col gap-1 text-xs text-slate-600">
             FITS HDU index
-            <input
-              type="number"
-              step="1"
-              min="0"
-              placeholder="optional"
-              value={hduIndex}
-              onChange={(e) => setHduIndex(e.target.value)}
-              className="rounded-md border border-slate-300 px-2 py-1.5 text-sm"
-            />
+            {hduList && hduList.length > 0 ? (
+              <select
+                value={hduIndex}
+                onChange={(e) => setHduIndex(e.target.value)}
+                className="rounded-md border border-slate-300 px-2 py-1.5 text-sm"
+              >
+                <option value="">auto (first 2-D image)</option>
+                {hduList.map((h) => (
+                  <option key={h.index} value={h.index} disabled={!h.is_2d_image}>
+                    [{h.index}] {h.type}
+                    {h.shape ? ` ${h.shape.join("×")}` : ""}
+                    {h.is_2d_image ? "" : " (not 2-D)"}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <input
+                type="number"
+                step="1"
+                min="0"
+                placeholder="optional"
+                value={hduIndex}
+                onChange={(e) => setHduIndex(e.target.value)}
+                className="rounded-md border border-slate-300 px-2 py-1.5 text-sm"
+              />
+            )}
           </label>
           <label className="flex items-end gap-2 text-sm text-slate-700">
-            <input
-              type="checkbox"
-              checked={hough}
-              onChange={(e) => setHough(e.target.checked)}
-              className="h-4 w-4"
-            />
+            <input type="checkbox" checked={hough} onChange={(e) => setHough(e.target.checked)} className="h-4 w-4" />
             Hough overlay
           </label>
         </div>
@@ -318,16 +392,18 @@ function InputView(props: {
         </dl>
       </Card>
 
-      {error && (
-        <div className="rounded-lg border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-700">
-          {error}
+      {reject413 && !cropping && (
+        <div className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          {reject413}
         </div>
+      )}
+      {error && (
+        <div className="rounded-lg border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>
       )}
 
       <div className="flex items-center justify-between gap-3">
         <p className="text-xs text-slate-500">
-          The model and threshold are fixed; this run does not tune parameters or estimate
-          accuracy.
+          The model and threshold are fixed; this run does not tune parameters or estimate accuracy.
         </p>
         <button
           onClick={onRun}
@@ -350,12 +426,10 @@ function ProcessingView({ filename, stage }: { filename: string; stage: string }
         <p className="mt-1 text-sm text-slate-500">{stage}…</p>
       </div>
       <p className="max-w-md text-xs text-slate-400">
-        Large images may take up to a minute on CPU. Images over 64 patches are rejected in
-        this demo.
+        Large images may take up to a minute on CPU. Images over 64 patches are rejected in this demo.
       </p>
       <p className="max-w-md text-xs text-slate-400">
-        The model and threshold are fixed; this run does not tune parameters or estimate
-        accuracy.
+        The model and threshold are fixed; this run does not tune parameters or estimate accuracy.
       </p>
     </Card>
   );
@@ -367,21 +441,46 @@ function OutputView(props: {
   setShowMask: (b: boolean) => void;
   showHough: boolean;
   setShowHough: (b: boolean) => void;
+  showProb: boolean;
+  setShowProb: (b: boolean) => void;
   opacity: number;
   setOpacity: (n: number) => void;
+  highlight: number | null;
+  setHighlight: (n: number | null) => void;
+  probHover: ProbHover;
+  setProbHover: (h: ProbHover) => void;
+  compareHough: boolean;
+  setCompareHough: (b: boolean) => void;
+  copied: boolean;
+  setCopied: (b: boolean) => void;
   onReset: () => void;
 }) {
-  const { result, showMask, setShowMask, showHough, setShowHough, opacity, setOpacity, onReset } =
-    props;
+  const {
+    result, showMask, setShowMask, showHough, setShowHough, showProb, setShowProb,
+    opacity, setOpacity, highlight, setHighlight, probHover, setProbHover,
+    compareHough, setCompareHough, copied, setCopied, onReset,
+  } = props;
   const { result_id, stats } = result;
   const mo = stats.model_output;
+  const hasOriginal = stats.artifacts.includes("original_preview.png");
+
+  const canvasProps = {
+    inputUrl: resultUrl(result_id, "input_8bit.png"),
+    maskUrl: resultUrl(result_id, "mask.png"),
+    probUrl: resultUrl(result_id, "prob.png"),
+    stats,
+    opacity,
+    highlight,
+  };
 
   return (
     <div className="space-y-5">
-      {/* Neutral tier banner (same blue/grey style for all tiers; text differs). */}
       <div className="rounded-xl border border-blue-200 bg-blue-50 px-5 py-4">
         <p className="text-xs font-semibold uppercase tracking-wide text-blue-700">
-          Tier: {stats.tier.replace(/_/g, " ")}
+          Tier: {stats.tier.replace(/_/g, " ")}{" "}
+          <span className="cursor-help text-blue-400" title={TIER_DEFS}>
+            (what&apos;s this?)
+          </span>
         </p>
         <p className="mt-1 text-sm text-slate-700">{TIER_TEXT[stats.tier]}</p>
         <p className="mt-1 text-sm font-medium text-slate-700">{DISCLAIMER}</p>
@@ -396,57 +495,67 @@ function OutputView(props: {
 
       <Card>
         <div className="mb-3 flex flex-wrap items-center gap-4">
-          <label className="flex items-center gap-2 text-sm text-slate-700">
-            <input type="checkbox" checked={showMask} onChange={(e) => setShowMask(e.target.checked)} />
-            <span className="inline-block h-3 w-3 rounded-sm" style={{ background: "rgb(255,47,146)" }} />
-            Predicted mask
-          </label>
-          <label className="flex items-center gap-2 text-sm text-slate-700">
-            <input
-              type="checkbox"
-              checked={showHough}
-              onChange={(e) => setShowHough(e.target.checked)}
-              disabled={!stats.hough.enabled}
-            />
-            <span className="inline-block h-3 w-3 rounded-sm" style={{ background: "rgb(0,200,255)" }} />
-            Hough overlay {stats.hough.enabled ? "" : "(off)"}
+          <Toggle color="rgb(255,47,146)" label="Predicted mask" checked={showMask} onChange={setShowMask} />
+          <Toggle
+            color="rgb(0,200,255)"
+            label={`Hough overlay${stats.hough.enabled ? "" : " (off)"}`}
+            checked={showHough}
+            onChange={setShowHough}
+            disabled={!stats.hough.enabled}
+          />
+          <Toggle color="linear-gradient(90deg,#2563eb,#ef4444)" label="Model confidence" checked={showProb} onChange={setShowProb} />
+          <label className="flex items-center gap-2 text-xs text-slate-600">
+            <input type="checkbox" checked={compareHough} onChange={(e) => setCompareHough(e.target.checked)} />
+            Compare Hough off/on
           </label>
           <label className="ml-auto flex items-center gap-2 text-xs text-slate-600">
             Overlay opacity
-            <input
-              type="range"
-              min={0}
-              max={1}
-              step={0.05}
-              value={opacity}
-              onChange={(e) => setOpacity(Number(e.target.value))}
-            />
+            <input type="range" min={0} max={1} step={0.05} value={opacity} onChange={(e) => setOpacity(Number(e.target.value))} />
           </label>
         </div>
-        <div className="grid gap-3 sm:grid-cols-2">
-          <figure>
-            <figcaption className="mb-1 text-xs text-slate-500">
-              Model input (input_8bit.png — exactly what the model saw)
-            </figcaption>
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={resultUrl(result_id, "input_8bit.png")}
-              alt="Model input"
-              className="w-full rounded-lg border border-slate-300 bg-black"
-            />
-          </figure>
-          <figure>
-            <figcaption className="mb-1 text-xs text-slate-500">Overlay</figcaption>
-            <CanvasCompare
-              inputUrl={resultUrl(result_id, "input_8bit.png")}
-              maskUrl={resultUrl(result_id, "mask.png")}
-              stats={stats}
-              showMask={showMask}
-              showHough={showHough}
-              opacity={opacity}
-            />
-          </figure>
-        </div>
+
+        {compareHough ? (
+          <div className="grid gap-3 sm:grid-cols-2">
+            <figure>
+              <figcaption className="mb-1 text-xs text-slate-500">Hough off</figcaption>
+              <CanvasCompare {...canvasProps} showMask={showMask} showHough={false} showProb={showProb} />
+            </figure>
+            <figure>
+              <figcaption className="mb-1 text-xs text-slate-500">Hough on</figcaption>
+              <CanvasCompare {...canvasProps} showMask={showMask} showHough={true} showProb={showProb} />
+            </figure>
+          </div>
+        ) : (
+          <div className={`grid gap-3 ${hasOriginal ? "sm:grid-cols-3" : "sm:grid-cols-2"}`}>
+            {hasOriginal && (
+              <figure>
+                <figcaption className="mb-1 text-xs text-slate-500">As uploaded (pre-resample)</figcaption>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={resultUrl(result_id, "original_preview.png")}
+                  alt="As uploaded"
+                  className="w-full rounded-lg border border-slate-300 bg-black"
+                />
+              </figure>
+            )}
+            <figure>
+              <figcaption className="mb-1 text-xs text-slate-500">Model input (what the model saw)</figcaption>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={resultUrl(result_id, "input_8bit.png")}
+                alt="Model input"
+                className="w-full rounded-lg border border-slate-300 bg-black"
+              />
+            </figure>
+            <figure>
+              <figcaption className="mb-1 flex items-center justify-between text-xs text-slate-500">
+                <span>Overlay (scroll to zoom · drag to pan)</span>
+                {probHover && <span className="font-mono text-slate-600">p={probHover.p.toFixed(3)} @ ({probHover.x},{probHover.y})</span>}
+              </figcaption>
+              <CanvasCompare {...canvasProps} showMask={showMask} showHough={showHough} showProb={showProb} onProbHover={setProbHover} />
+            </figure>
+          </div>
+        )}
       </Card>
 
       <div className="grid gap-5 lg:grid-cols-2">
@@ -462,15 +571,26 @@ function OutputView(props: {
             <Stat label="Patches" value={fmt(stats.image.n_patches)} />
             <Stat
               label="Runtime"
-              value={`${fmt(
-                stats.timing_ms.preprocess + stats.timing_ms.inference + stats.timing_ms.hough,
-              )} ms`}
+              value={`${fmt(stats.timing_ms.preprocess + stats.timing_ms.inference + stats.timing_ms.hough)} ms`}
             />
           </dl>
         </Card>
 
         <Card>
-          <h2 className="mb-3 text-sm font-semibold text-slate-700">Provenance</h2>
+          <div className="mb-3 flex items-center justify-between">
+            <h2 className="text-sm font-semibold text-slate-700">Provenance</h2>
+            <button
+              onClick={() => {
+                navigator.clipboard.writeText(JSON.stringify(stats.provenance, null, 2));
+                setCopied(true);
+                window.setTimeout(() => setCopied(false), 1500);
+              }}
+              className="inline-flex items-center gap-1 rounded border border-slate-300 px-2 py-1 text-xs text-slate-600 hover:bg-slate-100"
+            >
+              <Copy className="h-3 w-3" />
+              {copied ? "Copied" : "Copy"}
+            </button>
+          </div>
           <dl className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-xs">
             <Stat label="Format" value={stats.provenance.format} small />
             <Stat label="HDU" value={stats.provenance.hdu ?? "—"} small />
@@ -484,23 +604,15 @@ function OutputView(props: {
             />
             <Stat label="Resample factor" value={stats.provenance.resample_factor.toFixed(4)} small />
             <Stat label="Threshold" value={stats.provenance.threshold.toString()} small />
-            <Stat
-              label="Checkpoint SHA"
-              value={`${stats.provenance.checkpoint_sha256.slice(0, 12)}…`}
-              small
-            />
-            <Stat
-              label="Vendored commit"
-              value={`${stats.provenance.vendored_source_commit.slice(0, 12)}…`}
-              small
-            />
+            <Stat label="Checkpoint SHA" value={`${stats.provenance.checkpoint_sha256.slice(0, 12)}…`} small />
+            <Stat label="Vendored commit" value={`${stats.provenance.vendored_source_commit.slice(0, 12)}…`} small />
           </dl>
         </Card>
       </div>
 
       <Card>
         <h2 className="mb-3 text-sm font-semibold text-slate-700">
-          Predicted components ({mo.predicted_component_count})
+          Predicted components ({mo.predicted_component_count}) — click a row to highlight
         </h2>
         <div className="overflow-x-auto">
           <table className="w-full text-left text-xs">
@@ -515,7 +627,13 @@ function OutputView(props: {
             </thead>
             <tbody>
               {mo.predicted_components.slice(0, 50).map((c) => (
-                <tr key={c.index} className="border-t border-slate-100">
+                <tr
+                  key={c.index}
+                  onClick={() => setHighlight(highlight === c.index ? null : c.index)}
+                  className={`cursor-pointer border-t border-slate-100 ${
+                    highlight === c.index ? "bg-yellow-100" : "hover:bg-slate-50"
+                  }`}
+                >
                   <td className="py-1 pr-3">{c.index}</td>
                   <td className="py-1 pr-3">{fmt(c.pixel_count)}</td>
                   <td className="py-1 pr-3">[{c.bbox.join(", ")}]</td>
@@ -525,9 +643,7 @@ function OutputView(props: {
               ))}
             </tbody>
           </table>
-          {mo.predicted_components.length === 0 && (
-            <p className="py-2 text-xs text-slate-500">No predicted components.</p>
-          )}
+          {mo.predicted_components.length === 0 && <p className="py-2 text-xs text-slate-500">No predicted components.</p>}
         </div>
       </Card>
 
@@ -537,8 +653,10 @@ function OutputView(props: {
           {([
             ["overlay.png", "Overlay"],
             ["mask.png", "Mask"],
+            ["prob.png", "Confidence"],
             ["input_8bit.png", "Model input"],
             ["stats.json", "Stats JSON"],
+            ["bundle.zip", "All (.zip)"],
           ] as const).map(([f, label]) => (
             <a
               key={f}
@@ -563,15 +681,29 @@ function OutputView(props: {
   );
 }
 
-function Stat({
+function Toggle({
+  color,
   label,
-  value,
-  small = false,
+  checked,
+  onChange,
+  disabled = false,
 }: {
+  color: string;
   label: string;
-  value: string | number;
-  small?: boolean;
+  checked: boolean;
+  onChange: (b: boolean) => void;
+  disabled?: boolean;
 }) {
+  return (
+    <label className="flex items-center gap-2 text-sm text-slate-700">
+      <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} disabled={disabled} />
+      <span className="inline-block h-3 w-3 rounded-sm" style={{ background: color }} />
+      {label}
+    </label>
+  );
+}
+
+function Stat({ label, value, small = false }: { label: string; value: string | number; small?: boolean }) {
   return (
     <div>
       <dt className="text-slate-500">{label}</dt>

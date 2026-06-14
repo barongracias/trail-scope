@@ -15,6 +15,13 @@ sequenced enhancements to pick up after the v1 build (P1–P4, complete 2026-06-
 
 Effort key: **S** ≤½ day · **M** ~1 day · **L** multi-day. ⟐ = already a spec v2 candidate.
 
+> **Status (2026-06-15): v1.1, v1.2, and the S/M parts of v1.3 are BUILT and verified
+> end-to-end in a browser** (items 1–10, 13, 14). Deferred: **#11 async job queue (L)** and
+> **#12 full-frame beyond 64 patches (L, depends on #11 and relaxes the locked budget)** —
+> left out to avoid destabilising the verified synchronous path. v1.4 stays "keep vendored".
+> Build details in `agents/progress.md`; the `vendored/` faithfulness checksum (under v1.4)
+> remains the only other open, low-priority item.
+
 ---
 
 ## Phase v1.1 — high-value, low-risk (in the spirit of the frozen contract)

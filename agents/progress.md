@@ -151,3 +151,33 @@ and what's next. Keep newest at the bottom.
   Docker images not built locally (daemon off) — the CI docker-build job covers that.
 - Disclaimer + neutral tiers now present in all five required places: input page, output
   page, README, `/model`, `stats.json`. **v1 build complete (P1–P4).**
+
+### 2026-06-15 — v1.1–v1.3 enhancements (built + browser-verified)
+Implemented the non-scope-breaking roadmap items (see `agents/roadmap.md`); the frozen v1
+contract and all honesty guardrails are unchanged.
+- **Backend** (40 tests passing, ruff clean):
+  - Demo-result cache: `sha256(bytes + options) → result_id`, bounded LRU, self-healing,
+    cleared on startup (`infer.cache_hit`).
+  - Concurrency guard: `MAX_CONCURRENT_INFER` (default 2) → **429** on overflow.
+  - Result-dir **TTL cleanup** (`RESULTS_TTL_SECONDS`, default 3600) swept per request.
+  - `prob.png` grayscale model-confidence map + `original_preview.png` (pre-resample "as
+    uploaded", only when resampling changed geometry); `stats.artifacts` lists what's
+    present; serving allowlist + a `bundle.zip` of all artifacts.
+  - `POST /inspect` lists FITS HDUs (index/type/shape/is_2d_image) for the picker.
+  - CPU speedups: `torch.set_num_threads(cpu_count)` at load; `torch.inference_mode()`
+    wrapping the (frozen, untouched) vendored inference call.
+  - New tests: `tests/test_api_v11.py` (prob/original artifacts, cache reuse, 429, /inspect,
+    bundle.zip, TTL cleanup).
+- **Frontend** (lint/test/build clean): prob-heatmap toggle with a colourmapped layer +
+  **cursor probability readout** (samples prob.png); **click-a-component-to-highlight**
+  (bbox on the canvas); **crop-to-fit** rubber-band on the 413 path (raster only);
+  **FITS HDU picker** dropdown via `/inspect`; **original-vs-input** 3-panel for resampled
+  inputs; **Hough off/on side-by-side** compare; **zoom/pan** on the overlay; paste-from-
+  clipboard upload; copy-provenance button; "what's this?" tier tooltip; Confidence + .zip
+  downloads.
+- **Verified in-browser (Chrome via Playwright), zero console errors:** demo flow + all
+  toggles; component highlight; Hough compare (2 canvases); FITS upload → HDU dropdown
+  (`[1] CompImageHDU 4094×2046`) → `recipe_matched`, 3-panel, 13113 mask px; cursor readout
+  `p=…`; cache hit (identical result_id, logged); `bundle.zip` (5 files).
+- **Deferred (L):** #11 async job queue and #12 full-frame >64 patches (depends on #11 and
+  relaxes the locked budget) — left out to keep the verified sync path stable.

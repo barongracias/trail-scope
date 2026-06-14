@@ -39,7 +39,12 @@ class ModelService:
     @classmethod
     def load(cls) -> "ModelService":
         """Run the SHA gate, load the U-Net once, and assert the param count."""
+        import os
+
         import torch
+
+        # Use all CPU cores for the locked inference path (no GPU anywhere).
+        torch.set_num_threads(max(1, os.cpu_count() or 1))
 
         if not config.CHECKPOINT_PATH.exists():
             raise CheckpointError(f"Checkpoint not found at {config.CHECKPOINT_PATH}")

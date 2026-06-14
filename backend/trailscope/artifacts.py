@@ -112,12 +112,17 @@ def run_inference(
 
     Returns the stats dict (schema-compatible with `schemas.InferStats`).
     """
+    import torch
+
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     image_u8 = pre.image_u8
 
     t0 = time.perf_counter()
-    prob_canvas, _inf_meta = service.infer_probability_canvas(image_u8)
+    # inference_mode is a touch faster than the vendored function's inner no_grad and
+    # nests harmlessly; we wrap the call site rather than edit the frozen vendored core.
+    with torch.inference_mode():
+        prob_canvas, _inf_meta = service.infer_probability_canvas(image_u8)
     inference_ms = (time.perf_counter() - t0) * 1000.0
 
     binary = prob_canvas >= config.THRESHOLD
@@ -136,6 +141,14 @@ def run_inference(
     _write_png(out_dir / "input_8bit.png", image_u8)
     _write_png(out_dir / "mask.png", (binary.astype(np.uint8) * 255))
     _write_png(out_dir / "overlay.png", _build_overlay(image_u8, binary, hough_mask))
+    # Grayscale model-confidence map (prob*255); the frontend colourmaps it for display
+    # and samples the raw value for the cursor readout. Labelled "confidence", not a knob.
+    _write_png(out_dir / "prob.png", np.clip(prob_canvas * 255.0 + 0.5, 0, 255).astype(np.uint8))
+
+    artifact_files = ["input_8bit.png", "mask.png", "overlay.png", "prob.png", "stats.json"]
+    if pre.original_preview_u8 is not None:
+        _write_png(out_dir / "original_preview.png", pre.original_preview_u8)
+        artifact_files.insert(0, "original_preview.png")
 
     stats = {
         "qualitative_only": True,
@@ -147,6 +160,7 @@ def run_inference(
         "tier": pre.tier,
         "warnings": pre.warnings,
         "provenance": pre.provenance,
+        "artifacts": artifact_files,
         "image": {
             "input_shape": list(pre.input_shape),
             "processed_shape": list(pre.processed_shape),
