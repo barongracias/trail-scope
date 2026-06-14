@@ -11,8 +11,8 @@ and what's next. Keep newest at the bottom.
 - [x] **P2** — `preprocess.py` dispatch (FITS/PNG), pixel-scale/tier logic, patch-budget
   check after resample, + tests. **Milestone DONE: NAVSTAR-70 DECam frame end-to-end →
   mask.png + stats.json + input_8bit.png on CPU, reproducing the thesis result.**
-- [ ] **P3** — `/infer` (sync, 64-patch cap, 413 over), `artifacts.py` (overlay/mask/
-  input_8bit/stats), frontend results page.
+- [x] **P3** — `/infer` (sync, 64-patch cap, 413 over), `artifacts.py` (overlay/mask/
+  input_8bit/stats), frontend (input/processing/output states).
 - [ ] **P4** — Docker/CI, demo assets + `download_demo_assets.py`, README with scope
   sentence + disclaimer.
 
@@ -85,3 +85,37 @@ and what's next. Keep newest at the bottom.
   the general path uses the header value).
 - Next: **P3** — `/infer` route (sync, 64-patch cap, 413) + results file serving +
   the Next.js frontend (input/processing/output states).
+
+### 2026-06-14 — P3 complete (/infer + results serving + frontend)
+- **main.py** (still thin): `POST /infer` (multipart `file`, `hough` default true,
+  optional `pixel_scale_arcsec`/`hdu_index`) — upload validation lifted from InterPyApp
+  (extension allowlist incl. `.fits.fz`, 64 MB streamed cap, UUID storage), runs
+  preprocess→artifacts via `run_in_threadpool`, deletes the upload in `finally`, maps
+  `PreprocessError`→413/400, returns `{result_id, stats}`; 503 when the checkpoint gate
+  failed. `GET /results/{id}/{file}` serves the four artifacts via `FileResponse` with a
+  32-hex id guard + filename allowlist (404 otherwise); result dirs cleared on startup.
+- **test_api.py** (9 tests): unsupported-extension 400, schema-valid sync infer with all
+  four honesty fields, all four result files served, post-resample 413 path, results 404s
+  (garbage id / unknown artifact / before-infer), health ok, and corrupted-checkpoint →
+  503 startup refusal. Backend suite now **32 passing**.
+- **Frontend** (Next 14 + Tailwind v4, chassis lifted from InterPyApp): `lib/api.ts`
+  typed client (`ApiError`, env base URL, `infer`/`resultUrl`/`healthCheck`/`getModelInfo`).
+  `app/page.tsx` is the three-state tool — **input** (drag-drop, accepted types + 64 MB,
+  DECam demo picker, pixel-scale + HDU overrides, Hough toggle default on, locked model
+  card, caveat), **processing** (filename, spinner, staged text, the 64-patch note +
+  caveat), **output** (neutral blue/grey tier banner [same style all tiers] + warnings;
+  `input_8bit.png` vs a `<canvas>` overlay with opacity slider + independent Mask/Hough
+  toggles; result summary; provenance panel; predicted-components table with `—` for null
+  axis/orientation; downloads; disclaimer footer). `CanvasCompare.tsx` composes input +
+  recoloured mask + Hough segments (from stats) client-side via CORS-clean blob bitmaps.
+- Disclaimer present on input page, output page, `/model`, stats.json (README next, P4).
+  Vocabulary stays "predicted mask/component" (a frontend test forbids "detection").
+- **Demo asset**: `frontend/public/demo/decam_navstar70_crop.png` — a 700×662 8-bit crop
+  derived from the public NAVSTAR-70 DECam frame (streak clearly visible; NOIRLab ack in
+  footer). No MeerLICHT data.
+- Verified: `npm run lint` clean, `npm test` (node --test ×4) pass, `npm run build` OK;
+  live backend `/infer` on the demo crop → tier in_domain_like, mask 8793 px, 1 component,
+  16 Hough segments, 4 patches; all four artifacts serve 200; garbage id → 404.
+- Next: **P4** — docker-compose, CI workflow, `scripts/{docker_*,run_local}.sh`, README
+  with scope sentence + disclaimer + NOIRLab acknowledgement, `requirements.lock`/Docker
+  checkpoint SHA verification at build.

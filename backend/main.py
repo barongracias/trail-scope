@@ -12,15 +12,22 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import shutil
+import uuid
 from contextlib import asynccontextmanager
+from pathlib import Path
+from typing import Optional
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from starlette.concurrency import run_in_threadpool
 
-from trailscope import config
+from trailscope import artifacts, config
 from trailscope.inference import CheckpointError, ModelService
-from trailscope.schemas import HealthResponse, ModelResponse
+from trailscope.preprocess import PreprocessError, preprocess_image
+from trailscope.schemas import HealthResponse, InferResponse, ModelResponse
 
 # --------------------------------------------------------------------------------------
 # Structured logging (lifted from InterPyApp)
@@ -151,3 +158,128 @@ async def model() -> ModelResponse:
         disclaimer=config.DISCLAIMER,
         user_facing_knobs=["hough (on/off)", "pixel_scale_arcsec (optional)", "hdu_index (optional)"],
     )
+
+
+# --------------------------------------------------------------------------------------
+# /infer — upload validation pattern lifted from InterPyApp (extension allowlist + size
+# cap + UUID storage), then the locked preprocess → inference → artifacts path.
+# --------------------------------------------------------------------------------------
+_RESULT_FILES = {"input_8bit.png", "mask.png", "overlay.png", "stats.json"}
+_RESULT_ID_RE = re.compile(r"^[0-9a-f]{32}$")
+
+
+def _matched_extension(filename: str) -> str | None:
+    """Return the longest allowed suffix matching `filename` (handles `.fits.fz`)."""
+    name = filename.lower()
+    for ext in sorted(config.ALLOWED_EXTENSIONS, key=len, reverse=True):
+        if name.endswith(ext):
+            return ext
+    return None
+
+
+async def _store_upload(file: UploadFile) -> tuple[Path, str, str]:
+    """Validate (extension + 64 MB cap) and store the upload under a UUID. Returns
+    (stored_path, result_id, original_filename)."""
+    original = os.path.basename(file.filename or "")
+    ext = _matched_extension(original)
+    if ext is None:
+        raise error_response(
+            400,
+            f"Unsupported file type. Allowed: {sorted(config.ALLOWED_EXTENSIONS)}",
+        )
+    result_id = uuid.uuid4().hex
+    config.UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    dest = config.UPLOAD_DIR / f"{result_id}{ext}"
+    size = 0
+    with open(dest, "wb") as fh:
+        while True:
+            chunk = await file.read(1 << 20)
+            if not chunk:
+                break
+            size += len(chunk)
+            if size > config.MAX_UPLOAD_BYTES:
+                fh.close()
+                dest.unlink(missing_ok=True)
+                raise error_response(413, "File too large. Limit is 64 MB.")
+            fh.write(chunk)
+    return dest, result_id, original
+
+
+def _run_inference_job(
+    stored_path: Path,
+    original_filename: str,
+    service: ModelService,
+    *,
+    hough: bool,
+    pixel_scale_arcsec: float | None,
+    hdu_index: int | None,
+    result_id: str,
+) -> dict:
+    pre = preprocess_image(
+        stored_path,
+        filename=original_filename,
+        pixel_scale_arcsec=pixel_scale_arcsec,
+        hdu_index=hdu_index,
+    )
+    return artifacts.run_inference(
+        pre, service, hough=hough, out_dir=config.RESULTS_DIR / result_id
+    )
+
+
+@app.post("/infer", response_model=InferResponse)
+async def infer(
+    file: UploadFile = File(...),
+    hough: bool = Form(True),
+    pixel_scale_arcsec: Optional[float] = Form(None),
+    hdu_index: Optional[int] = Form(None),
+) -> InferResponse:
+    """Synchronous single-image inference. The model and threshold are fixed; this run
+    does not tune parameters or estimate accuracy."""
+    service = getattr(app.state, "model_service", None)
+    if service is None:
+        raise error_response(503, "Model unavailable: checkpoint failed the integrity gate.")
+
+    stored_path, result_id, original = await _store_upload(file)
+    try:
+        stats = await run_in_threadpool(
+            _run_inference_job,
+            stored_path,
+            original,
+            service,
+            hough=hough,
+            pixel_scale_arcsec=pixel_scale_arcsec,
+            hdu_index=hdu_index,
+            result_id=result_id,
+        )
+    except PreprocessError as exc:
+        log_event("infer.rejected", status=exc.status_code, detail=exc.detail)
+        raise error_response(exc.status_code, exc.detail)
+    except HTTPException:
+        raise
+    except Exception as exc:  # pragma: no cover - defensive
+        log_event("infer.error", error=str(exc))
+        raise error_response(500, f"Inference failed: {exc}")
+    finally:
+        stored_path.unlink(missing_ok=True)
+
+    log_event(
+        "infer.completed",
+        result_id=result_id,
+        tier=stats["tier"],
+        n_patches=stats["image"]["n_patches"],
+    )
+    return InferResponse(result_id=result_id, stats=stats)
+
+
+@app.get("/results/{result_id}/{filename}")
+async def get_result(result_id: str, filename: str):
+    """Serve a per-result artifact. Results live in a per-UUID dir cleared on startup."""
+    if filename not in _RESULT_FILES:
+        raise error_response(404, f"Unknown artifact: {filename}")
+    if not _RESULT_ID_RE.match(result_id):
+        raise error_response(404, "Unknown result id")
+    path = config.RESULTS_DIR / result_id / filename
+    if not path.exists():
+        raise error_response(404, "Result not found")
+    media_type = "application/json" if filename.endswith(".json") else "image/png"
+    return FileResponse(path, media_type=media_type)
