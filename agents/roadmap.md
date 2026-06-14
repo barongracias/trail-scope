@@ -1,0 +1,185 @@
+# trail-scope — post-v1 improvement plan (v1.1+)
+
+Companion to `agents/spec.md` (the **frozen v1** spec). Nothing here changes v1; these are
+sequenced enhancements to pick up after the v1 build (P1–P4, complete 2026-06-14).
+
+**Binding constraints for every item below** (from `CLAUDE.md`):
+- Locked invariants stay constants, never knobs: checkpoint (SHA-gated), `THRESHOLD=0.45`,
+  Hough `0.1/50/100/250/3`, `PATCH_SIZE=528`, `full_image` norm, `TARGET=0.56″/px`. User
+  knobs remain only: Hough on/off, pixel-scale override, HDU index.
+- Honesty/scope: qualitative only. No precision/recall/accuracy, no benchmark claims, no
+  threshold tuning for uploads. "predicted mask/component" vocabulary, never
+  "trail"/"detection". Disclaimer + neutral tier stay on input page, output page, README,
+  `/model`, `stats.json`.
+- Data policy: public DECam only; never MeerLICHT.
+
+Effort key: **S** ≤½ day · **M** ~1 day · **L** multi-day. ⟐ = already a spec v2 candidate.
+
+---
+
+## Phase v1.1 — high-value, low-risk (in the spirit of the frozen contract)
+
+### 1. Demo-result caching — S
+**Why:** the demo picker re-runs the U-Net (~1–2 s CPU) on every click.
+**Approach (backend):** in `main.py` `/infer`, compute `key = sha256(file_bytes + repr(hough,
+pixel_scale, hdu))`; keep a small dict `key → result_id` (and reuse the existing per-id
+result dir). If hit and the dir still exists, return `{result_id, stats}` from the cached
+`stats.json` (read it back) without re-inferring; else run and record. Bound the map (e.g.
+LRU, 64 entries) and clear it in the lifespan startup alongside the dirs.
+**Notes:** cache is best-effort; correctness is unaffected by eviction. No schema change.
+**Acceptance:** second identical demo request returns the same `result_id` and skips the
+`infer.completed` U-Net path (assert via a timing/log check in a test).
+
+### 2. Probability heatmap toggle — M
+**Why:** the single most *honest* addition — shows where and how confident the model is.
+**Approach (backend):** in `artifacts.run_inference`, after the prob canvas, render a
+colormapped 0→1 PNG (`prob.png`) with a perceptually-uniform map (e.g. `cv2.applyColorMap`
+on `(prob*255)`), and add `"prob.png"` to `_RESULT_FILES` in `main.py` and to the
+`resultUrl` filename union in `lib/api.ts`. Add `max/mean` already in stats; optionally add
+a tiny legend.
+**Approach (frontend):** new overlay layer in `CanvasCompare.tsx` (toggle "Model
+confidence") drawn *under* mask/Hough with its own opacity; or a third image panel.
+**Honesty:** label it "model confidence (qualitative)", NOT a tunable threshold. Do **not**
+add a client-side re-threshold slider over it (that implies tuning — out of scope).
+**Acceptance:** `prob.png` served + rendered; values monotonic with `prob` (spot-check).
+
+### 3. Click-a-component-to-highlight — S (frontend only)
+**Why:** make the components table actionable.
+**Approach:** lift `selectedComponent` state into `OutputView`; pass to `CanvasCompare`;
+when set, stroke that component's `bbox` (already in `stats.model_output.predicted_components`)
+in a highlight colour on the canvas. Row click toggles selection; hover highlights.
+**Acceptance:** clicking row N boxes component N on the overlay; clicking again clears.
+
+### 4. Crop-to-fit for the 413 path — M
+**Why:** turn the "image too large (>64 patches)" dead end into a workflow.
+**Approach (frontend):** when `/infer` returns 413, instead of only showing the message,
+render the uploaded image on a canvas with a draggable/resizable crop rectangle; on confirm,
+crop client-side (canvas `toBlob`) and resubmit. Show the live post-resample patch estimate
+(replicate the budget math: `ceil(h/528)*ceil(w/528)` against the chosen scale) so the user
+sees when they're under 64.
+**Honesty:** cropping is a user action on their own image; provenance already records
+`input_shape` vs `processed_shape`. No locked-path change.
+**Acceptance:** an image that 413s can be cropped in-browser and run successfully.
+
+---
+
+## Phase v1.2 — usability
+
+### 5. FITS HDU picker dropdown — M
+**Why:** typing an index is opaque; the backend already lists HDUs on error.
+**Approach:** add `GET /inspect` (multipart `file`) that opens the FITS and returns
+`[{index, type, shape}]` (reuse `_hdu_summary`/`select_image_hdu` logic from `preprocess`).
+Frontend: on a FITS upload, call `/inspect`, populate a dropdown; pass the chosen
+`hdu_index` to `/infer`. Non-FITS uploads skip it.
+**Acceptance:** multi-HDU FITS shows a dropdown; selection drives `/infer`.
+
+### 6. Original vs model-input view (FITS/16-bit) — S
+**Why:** make the ZScale/resample domain shift explicit; strengthens the honesty story.
+**Approach (backend):** optionally also write `original_preview.png` (a downsized ZScale of
+the *pre-resample* cleaned image) and add to the result set; (frontend) a third panel
+"As uploaded → what the model saw". For 8-bit passthrough the two are identical (skip).
+**Acceptance:** FITS results show both panels; provenance dims line up.
+
+### 7. Overlay UX cluster — S (frontend)
+Zoom/pan on the comparison (wheel + drag) for large frames; a **cursor probability readout**
+(needs `prob.png` from #2, or a served prob array — sample on mousemove); **paste-from-
+clipboard** upload (`onPaste` → file); **copy-provenance** button (JSON to clipboard);
+**"why this tier?"** tooltip wired to `/model`'s `tier_definitions`.
+**Acceptance:** each control works; no a11y regressions (keyboard-focusable).
+
+### 8. Bundled ZIP download — S
+**Why:** one click for all artifacts + stats.
+**Approach (backend):** `GET /results/{id}/bundle.zip` streams the four (or six) files via
+`zipfile`/`StreamingResponse`. Frontend: a "Download all (.zip)" button.
+**Acceptance:** zip contains exactly the served artifacts + `stats.json`.
+
+### 9. Hough off/on side-by-side view — S ⟐
+**Why:** the spec's one sanctioned comparison feature; shows the classical aid's effect.
+**Approach (frontend only):** the canvas already toggles Hough independently. Add a
+"Compare" mode that renders two `CanvasCompare` panels — left `showHough=false`, right
+`showHough=true` — sharing opacity. No backend change; segments already in `stats`.
+**Honesty:** purely visual; both use the locked Hough params. Do not expose Hough
+parameters as knobs.
+**Acceptance:** toggling Compare shows mask-only vs mask+Hough side by side.
+
+---
+
+## Phase v1.3 — performance & ops
+
+### 10. CPU inference speedups — S→M
+`torch.inference_mode()` in `preprocess_core.infer_probability_canvas` (replace `no_grad`);
+tune `torch.set_num_threads(os.cpu_count())` at startup; **export the locked weights to
+TorchScript or ONNX** once and load that for faster CPU inference (keep the SHA gate on the
+source `.pth`; derive + checksum the exported artifact at build).
+**Acceptance:** measured wall-clock drop on the DECam frame with identical mask pixel count
+(±tolerance) — no behavioural change.
+
+### 11. Async job queue + progress — L ⟐
+**Why:** large frames block the synchronous request; also the path to >64-patch support.
+**Approach:** v2-style status files in the per-result dir (`status.json`: queued→preprocess
+→inferring(patch k/N)→rendering→done|error); `/infer` returns `{result_id}` immediately;
+add `GET /results/{id}/status` and stream patch progress (SSE) to the processing view.
+A single worker (CPU-bound) with a bounded queue; reject/queue-full → honest message.
+**Acceptance:** UI shows live patch progress; a slow frame doesn't hold the request open.
+
+### 12. Full-frame support beyond 64 patches — L ⟐ (depends on #11)
+Lift `MAX_PATCH_BUDGET` behind the async path, with a hard ceiling and a clear runtime/RAM
+warning. Keep the 64-patch synchronous fast path as the default. **Stays out of scope until
+#11 exists** — never make the synchronous path unbounded.
+
+### 13. Result-dir TTL cleanup — S
+**Why:** dirs are only cleared on startup; a long-running server accumulates them.
+**Approach:** record `created_at` per result; a periodic asyncio task (or check on each
+`/infer`) removes dirs older than `RESULTS_TTL_SECONDS` (env, default e.g. 3600). Keep the
+startup wipe.
+**Acceptance:** an aged result dir is removed; a fresh one survives.
+
+### 14. CI Playwright smoke + rate limiting — M
+Add a CI job that boots backend+frontend and runs the verified browser flow (input → demo →
+infer → output assertions) headless. Add a small concurrency guard on `/infer` (semaphore;
+CPU-bound) returning a polite 429 when saturated.
+**Acceptance:** CI fails if the end-to-end UI flow breaks; concurrent floods get 429 not OOM.
+
+---
+
+## Phase v1.4 — retire the vendoring debt — L ⟐  (see note below)
+
+**What it means.** Today the inference core (`unet.py`, `loading.py`, `hough_runner.py`,
+`preprocess_core.py`) is a **frozen verbatim copy** under `backend/trailscope/vendored/`,
+duplicated from the thesis repo `bg492` at commit `b9a4e602`. Vendoring was the right call
+for v1 (zero coupling, no `src.*` imports, ships standalone), but it is **duplication**:
+there is no single source of truth, and if the thesis code improves the copy silently
+drifts.
+
+**The fix, in steps:**
+1. **Extract a clean package.** In `bg492` (or a small spun-out repo), refactor the needed
+   functions into a real importable module with a stable public API — e.g.
+   `src/inference/full_image.py` exposing `load_model`, `preprocess`, `infer_canvas`,
+   `hough_overlay` — with its own `pyproject.toml` so it is `pip install`-able.
+2. **Tag a release.** Cut a version tag (e.g. `inference-v1.0.0`) so the API is pinned and
+   versioned, not a moving branch.
+3. **Pip-pin it in trail-scope.** Replace the vendored dir with a dependency in
+   `backend/requirements.lock`, e.g.
+   `bg492-inference @ git+https://github.com/barongracias/bg492@inference-v1.0.0`
+   (or a published wheel), and import it instead of `trailscope.vendored.*`.
+4. **Delete `vendored/`** and repoint `inference.py`/`preprocess.py`. Update
+   `test_no_src_imports.py` to instead assert the pinned dependency (and that no stray copy
+   remains). The checkpoint SHA gate is unchanged — it still protects the weights.
+
+**Payoff:** one source of truth, real semver pinning, updates flow through a version bump
+(no silent drift), and the model code lives where it's authored.
+
+**⚠️ Hard prerequisite (CLAUDE.md rule 1).** `bg492` is the **read-only MPhil submission
+repo** — we must not modify it. So step 1 can only happen **after the thesis is
+submitted/finalised**, or by extracting the core into a *separate* public package/repo that
+both projects depend on. Until then, vendoring stays and this phase is parked. This is a
+deliberate trade, not an oversight.
+
+---
+
+## Explicitly NOT planned (would break scope — do not build)
+Threshold slider on uploads; any precision/recall/accuracy or benchmark output; a
+model-selection dropdown; exposing Hough/stretch/patch params as knobs; "detection"/"trail"
+vocabulary; multi-image batch (v1 is single-image by design). A client-side **re-threshold**
+slider over the probability map is specifically excluded — it implies tuning the locked
+detector.

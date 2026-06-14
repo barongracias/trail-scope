@@ -3,6 +3,10 @@
 Append a dated entry per work session: what was built, decisions made, what's verified,
 and what's next. Keep newest at the bottom.
 
+> v1 (P1–P4) is complete and verified end-to-end in a browser. Post-v1 enhancement plan
+> lives in **`agents/roadmap.md`** (v1.1–v1.4, with guardrails). The frozen spec is
+> `agents/spec.md`.
+
 ## Phasing (from agents/spec.md §Phasing)
 
 - [x] **P1** — backend scaffold, vendoring + `VENDOR_MANIFEST.md`, checkpoint copy +
