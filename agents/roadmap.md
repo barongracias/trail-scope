@@ -142,38 +142,54 @@ CPU-bound) returning a polite 429 when saturated.
 
 ---
 
-## Phase v1.4 — retire the vendoring debt — L ⟐  (see note below)
+## Phase v1.4 — vendoring: KEEP IT (decided 2026-06-15) — optional integrity hardening — S
 
-**What it means.** Today the inference core (`unet.py`, `loading.py`, `hough_runner.py`,
-`preprocess_core.py`) is a **frozen verbatim copy** under `backend/trailscope/vendored/`,
-duplicated from the thesis repo `bg492` at commit `b9a4e602`. Vendoring was the right call
-for v1 (zero coupling, no `src.*` imports, ships standalone), but it is **duplication**:
-there is no single source of truth, and if the thesis code improves the copy silently
-drifts.
+**Decision: leave the inference core vendored. Do not extract, do not package, do not touch
+`bg492`.** Reviewed by the thesis-repo agent (which mapped the coupling) and the trail-scope
+agent; both concur. The prior "no pip package" decision stands and the coupling map makes
+the case *stronger*, not weaker.
 
-**The fix, in steps:**
-1. **Extract a clean package.** In `bg492` (or a small spun-out repo), refactor the needed
-   functions into a real importable module with a stable public API — e.g.
-   `src/inference/full_image.py` exposing `load_model`, `preprocess`, `infer_canvas`,
-   `hough_overlay` — with its own `pyproject.toml` so it is `pip install`-able.
-2. **Tag a release.** Cut a version tag (e.g. `inference-v1.0.0`) so the API is pinned and
-   versioned, not a moving branch.
-3. **Pip-pin it in trail-scope.** Replace the vendored dir with a dependency in
-   `backend/requirements.lock`, e.g.
-   `bg492-inference @ git+https://github.com/barongracias/bg492@inference-v1.0.0`
-   (or a published wheel), and import it instead of `trailscope.vendored.*`.
-4. **Delete `vendored/`** and repoint `inference.py`/`preprocess.py`. Update
-   `test_no_src_imports.py` to instead assert the pinned dependency (and that no stray copy
-   remains). The checkpoint SHA gate is unchanged — it still protects the weights.
+**Why (this is the textbook-correct use of vendoring, not a smell):**
+- The "silently drifting copy" risk that normally motivates de-vendoring assumes an
+  **actively developed upstream**. Here the upstream is a **frozen thesis submission we have
+  explicitly decided not to touch** — a frozen source cannot drift. Vendoring a thin, frozen
+  harness away from a repo whose release cadence you deliberately don't control is exactly
+  what vendoring is *for*.
+- The genuine source of truth — the trained model — is already **singular and SHA-gated**.
+  The code around it is a harness, **behaviourally pinned by the e2e DECam test** (if the
+  vendored path breaks, NAVSTAR-70's 13113 px moves).
 
-**Payoff:** one source of truth, real semver pinning, updates flow through a version bump
-(no silent drift), and the model code lives where it's authored.
+**Coupling map (why extraction would be clean — which cuts both ways).** The core is
+leaf-level: `unet.py` → torch only; `hough_runner.py` → cv2/numpy only; `loading.py`'s only
+`src.*` edge was the attention_unet dispatch (already cut in the vendored copy); the 10
+`decam_cold_inference.py` functions → numpy/cv2 + one constant (`PATCH_SIZE=528`). The
+apparent `src.utils.imaging.resize_for_display` edge is used **only** in the montage/figure
+code (lines ~592–637), **not** by any of the 10 inference functions. So the entire `src.*`
+footprint of the inference core is one integer + an attention branch already removed. It's a
+clean lift precisely **because the vendored copy is already a clean, complete lift** — there
+is nothing tangled left to fix.
 
-**⚠️ Hard prerequisite (CLAUDE.md rule 1).** `bg492` is the **read-only MPhil submission
-repo** — we must not modify it. So step 1 can only happen **after the thesis is
-submitted/finalised**, or by extracting the core into a *separate* public package/repo that
-both projects depend on. Until then, vendoring stays and this phase is parked. This is a
-deliberate trade, not an oversight.
+**Options considered and rejected:**
+- **(b) Separate shared package both repos depend on** — only delivers "one source of truth"
+  if `bg492` *also* consumes it, which means ripping the modules out of `bg492/src/` and
+  replacing them with imports = exactly the restructuring of submission-ready code the prior
+  decision rejected (1–2 days + a new repo/CI/release to maintain + re-verifying the thesis
+  reproduces). Real submission risk; post-submission only.
+- **(c) Make `bg492` a pip dependency of trail-scope** — drags the entire research codebase
+  (training, sweeps, Optuna, attention, evaluation) and its heavy deps in to use four leaf
+  files, binds the demo to an experiment-shaped unstable API, and re-introduces the exact
+  `src.*` coupling `test_no_src_imports.py` forbids. Architecturally the worst option.
+
+**Optional, proportionate hardening (the only thing worth doing — and not urgent).** If the
+"silent" part still nags: record the **per-file SHA-256 of each vendored source** in
+`VENDOR_MANIFEST.md` and add a test asserting the vendored files still match those hashes.
+That converts an accidental local edit of the copy into a **loud failure** instead of silent
+drift. ~1 hour, entirely within trail-scope, touches nothing in `bg492`. Even this is
+optional — the e2e DECam test already guards faithfulness behaviourally. **Don't do it
+mid-annotation**; it changes nothing about correctness.
+
+**Status: settled — keep vendored.** No action required. The optional checksum guard above
+is the only future work, and it is low-priority.
 
 ---
 
