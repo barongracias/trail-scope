@@ -77,7 +77,11 @@ class ModelService:
         )
 
     def hough_overlay(self, prob_canvas: np.ndarray) -> np.ndarray:
-        """Draw the optional locked-parameter Hough overlay; returns a boolean mask."""
+        """Draw the optional locked-parameter Hough overlay; returns a boolean mask.
+
+        Uses the vendored `_apply_hough` verbatim — this is the path validated against
+        the thesis DECam `hough_pixel_count`.
+        """
         hough_input = (prob_canvas >= config.HOUGH_INPUT_THRESHOLD).astype(np.uint8) * 255
         drawn = _apply_hough(
             hough_input,
@@ -87,3 +91,24 @@ class ModelService:
             line_thickness=config.HOUGH_LINE_THICKNESS,
         )
         return drawn > 0
+
+    def hough_segments(self, prob_canvas: np.ndarray) -> list[list[int]]:
+        """Enumerate Hough line segments [x1,y1,x2,y2] for stats.
+
+        Mirrors `_apply_hough`'s exact `cv2.HoughLinesP` call (locked params), but
+        returns the segment list rather than a drawn canvas.
+        """
+        import cv2
+
+        hough_input = (prob_canvas >= config.HOUGH_INPUT_THRESHOLD).astype(np.uint8) * 255
+        lines = cv2.HoughLinesP(
+            hough_input,
+            rho=1,
+            theta=np.pi / 180.0,
+            threshold=config.HOUGH_THRESHOLD,
+            minLineLength=config.HOUGH_MIN_LINE_LENGTH,
+            maxLineGap=config.HOUGH_MAX_LINE_GAP,
+        )
+        if lines is None:
+            return []
+        return [[int(a), int(b), int(c), int(d)] for a, b, c, d in lines[:, 0]]

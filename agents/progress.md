@@ -8,9 +8,9 @@ and what's next. Keep newest at the bottom.
 - [x] **P1** — backend scaffold, vendoring + `VENDOR_MANIFEST.md`, checkpoint copy +
   SHA gate (startup refusal on mismatch), `/health`, `/model`. (frontend/compose deferred
   to P3/P4 per the walking-skeleton order.)
-- [ ] **P2** — `preprocess.py` dispatch (FITS/PNG), pixel-scale/tier logic, patch-budget
-  check after resample, + tests. **Milestone: one DECam demo frame end-to-end through the
-  backend → mask + stats JSON on CPU.**
+- [x] **P2** — `preprocess.py` dispatch (FITS/PNG), pixel-scale/tier logic, patch-budget
+  check after resample, + tests. **Milestone DONE: NAVSTAR-70 DECam frame end-to-end →
+  mask.png + stats.json + input_8bit.png on CPU, reproducing the thesis result.**
 - [ ] **P3** — `/infer` (sync, 64-patch cap, 413 over), `artifacts.py` (overlay/mask/
   input_8bit/stats), frontend results page.
 - [ ] **P4** — Docker/CI, demo assets + `download_demo_assets.py`, README with scope
@@ -50,3 +50,38 @@ and what's next. Keep newest at the bottom.
   refusal, /health + /model honesty) and `test_no_src_imports.py`.
 - Next: **P2** — `preprocess.py` (FITS/PNG dispatch, tier/pixel-scale, post-resample
   patch budget) + tests, then the DECam-frame end-to-end milestone.
+
+### 2026-06-14 — P2 complete + RISK-RETIRING MILESTONE met
+- **preprocess.py**: single `preprocess_image()` entry wrapping the vendored core.
+  FITS (astropy, explicit `hdu_index` or first 2-D HDU, lists HDUs on error) vs display
+  (PIL preserving bit depth; RGB→luminance ITU-R 601 with a provenance flag). Order:
+  load+clean (non-finite→median) → resolve pixel scale (override→header→unknown) →
+  resample `scale/0.56` INTER_AREA when known → stretch (8-bit passthrough; else ZScale
+  with percentile fallback) → **patch budget AFTER resample, 413 over 64**. Neutral tier:
+  `recipe_matched` (FITS+known scale), `in_domain_like` (8-bit display), `best_effort`
+  (unknown scale / other). Provenance carries all spec keys + checkpoint SHA + vendored
+  commit. `PreprocessError(status, detail)` carries the 413/400 to the route layer.
+- **inference.py**: added `hough_segments()` (segment list for stats, mirrors the vendored
+  `_apply_hough` call); `hough_overlay()` still uses the vendored function (the path
+  validated against thesis `hough_pixel_count`).
+- **artifacts.py**: `run_inference()` → prob canvas (threshold 0.45), binary mask,
+  connected-component stats (`cv2.connectedComponentsWithStats`; ellipse fit only with
+  ≥5 boundary points, else null axis/orientation — no fake values), optional Hough,
+  and writes `input_8bit.png` (always), `mask.png`, `overlay.png`, `stats.json`.
+  "predicted mask/component" vocabulary throughout.
+- **schemas.py**: full `InferStats` (+ `Provenance/ImageStats/ModelOutput/PredictedComponent/
+  HoughStats/TimingStats`) and `InferResponse`. Produced stats.json validates against it.
+- **scripts/download_demo_assets.py**: NOIRLab retrieval (httpx) for the 9 predeclared
+  public DECam frames; downloads to gitignored `.demo_cache/` (never committed; NOIRLab
+  acknowledgement emitted). MeerLICHT never touched.
+- **MILESTONE**: NAVSTAR-70 (exp 1134933 det 5) end-to-end on CPU in ~1.6 s →
+  `predicted_mask_pixel_count=13113` vs thesis **13111** (Δ2, cv2/torch float diffs),
+  `max_model_probability=0.9995` (exact), processed **1926×962**, **8 patches**,
+  tier `recipe_matched`; streak cleanly overlaid. The vendored pipeline reproduces the
+  locked detector path — risk retired.
+- Tests: 23 passing (preprocess contract ×12, synthetic inference/ellipse-null ×4,
+  e2e DECam ×1 [skips without the frame], P1 model/health ×6, no-src-imports). Used the
+  fixed DECam plate scale 0.2634 as override to match the thesis (header reads ≈0.2623;
+  the general path uses the header value).
+- Next: **P3** — `/infer` route (sync, 64-patch cap, 413) + results file serving +
+  the Next.js frontend (input/processing/output states).

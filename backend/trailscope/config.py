@@ -43,6 +43,10 @@ EXPECTED_CHECKPOINT_SHA256 = (
 )
 EXPECTED_CHECKPOINT_BYTES = 5_894_411
 
+# The bg492 commit the vendored inference core was copied at (VENDOR_MANIFEST.md);
+# surfaced in stats.json provenance.
+VENDORED_SOURCE_COMMIT = "b9a4e602e8ae570b016b5ed3a08d7bdb11b4055f"
+
 THRESHOLD = 0.45
 NORMALISATION = "full_image"
 PATCH_SIZE = 528

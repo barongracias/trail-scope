@@ -18,6 +18,10 @@ backend/results/
 backend/outputs/
 *.log
 
+# Downloaded demo FITS (large; fetched on demand, never committed — ship only small
+# cropped 8-bit PNGs derived from the public DECam frames).
+.demo_cache/
+
 # Env
 .env
 .env.local
