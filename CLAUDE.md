@@ -47,10 +47,11 @@ constants) are in **`agents/build_context.md`**. Record progress in
   + stats JSON on CPU**. Do not build the frontend until the backend produces a correct
   mask on a real frame. Then P3 (`/infer` + artifacts + frontend) and P4 (Docker/CI/
   demo assets/README). Phasing detail in `agents/spec.md`.
-- Use a local Python venv with **CPU torch wheels** (`--index-url
-  https://download.pytorch.org/whl/cpu`); `opencv-python-headless`, not
-  `opencv-python`. No GPU, no CSD3 — everything runs locally on the committed
-  checkpoint.
+- Use **this repo's own** `.venv` (gitignored) — do **not** share or install into the
+  sibling `../astro_venv`, which is the thesis test environment and must not be polluted.
+  Install **CPU torch wheels** (`--index-url https://download.pytorch.org/whl/cpu`);
+  `opencv-python-headless`, not `opencv-python`. No GPU, no CSD3 — everything runs locally
+  on the committed checkpoint.
 - Keep `main.py` thin (routes/validation/CORS/lifespan/errors); real logic lives in
   `backend/trailscope/`.
 
