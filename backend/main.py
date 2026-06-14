@@ -29,6 +29,7 @@ from trailscope.inference import CheckpointError, ModelService
 from trailscope.preprocess import PreprocessError, preprocess_image
 from trailscope.schemas import HealthResponse, InferResponse, ModelResponse
 
+
 # --------------------------------------------------------------------------------------
 # Structured logging (lifted from InterPyApp)
 # --------------------------------------------------------------------------------------

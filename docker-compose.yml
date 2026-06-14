@@ -1,0 +1,30 @@
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    image: trail-scope-backend:latest
+    ports:
+      - "8000:8000"
+    environment:
+      - PYTHONUNBUFFERED=1
+      - ALLOWED_ORIGINS=http://localhost:3000
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    image: trail-scope-frontend:latest
+    ports:
+      - "3000:3000"
+    environment:
+      # Browser-side calls go to the host-published backend port.
+      - NEXT_PUBLIC_API_URL=http://localhost:8000
+      - API_URL=http://backend:8000
+    depends_on:
+      - backend

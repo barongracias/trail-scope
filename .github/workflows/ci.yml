@@ -1,0 +1,60 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install backend deps (CPU torch)
+        run: |
+          cd backend
+          python -m pip install --upgrade pip
+          python -m pip install torch==2.12.0 --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install -r requirements.lock
+          python -m pip install ruff
+      - name: Ruff
+        run: |
+          cd backend
+          ruff check .
+      - name: Pytest
+        run: |
+          cd backend
+          # The end-to-end DECam test self-skips when the demo frame is absent.
+          python -m pytest tests
+
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Install dependencies
+        run: |
+          cd frontend
+          npm install --include=dev
+      - name: Lint, test, build
+        run: |
+          cd frontend
+          npm run lint
+          npm test
+          npm run build
+
+  docker-build:
+    runs-on: ubuntu-latest
+    needs: [backend, frontend]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build backend image (includes build-time checkpoint SHA gate)
+        run: docker build -t trail-scope-backend:ci -f backend/Dockerfile backend
+      - name: Build frontend image
+        run: docker build -t trail-scope-frontend:ci -f frontend/Dockerfile frontend

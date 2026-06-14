@@ -1,0 +1,9 @@
+line-length = 100
+
+# The vendored inference core is a frozen verbatim copy (see trailscope/vendored/
+# VENDOR_MANIFEST.md) — do not lint-churn it.
+extend-exclude = ["trailscope/vendored", ".venv"]
+
+[lint]
+select = ["E", "F", "W", "I"]
+ignore = ["E501"]  # long lines are tolerated (docstrings/messages)

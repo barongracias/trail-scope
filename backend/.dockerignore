@@ -1,0 +1,12 @@
+.venv
+__pycache__
+*.pyc
+.pytest_cache
+.ruff_cache
+uploads
+results
+outputs
+tests
+.env
+*.log
+.DS_Store

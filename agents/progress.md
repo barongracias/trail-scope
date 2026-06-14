@@ -13,8 +13,8 @@ and what's next. Keep newest at the bottom.
   mask.png + stats.json + input_8bit.png on CPU, reproducing the thesis result.**
 - [x] **P3** — `/infer` (sync, 64-patch cap, 413 over), `artifacts.py` (overlay/mask/
   input_8bit/stats), frontend (input/processing/output states).
-- [ ] **P4** — Docker/CI, demo assets + `download_demo_assets.py`, README with scope
-  sentence + disclaimer.
+- [x] **P4** — Docker/compose/CI, scripts, demo assets + `download_demo_assets.py`,
+  README with scope sentence + disclaimer + NOIRLab acknowledgement.
 
 ## Log
 
@@ -119,3 +119,31 @@ and what's next. Keep newest at the bottom.
 - Next: **P4** — docker-compose, CI workflow, `scripts/{docker_*,run_local}.sh`, README
   with scope sentence + disclaimer + NOIRLab acknowledgement, `requirements.lock`/Docker
   checkpoint SHA verification at build.
+
+### 2026-06-14 — P4 complete (Docker / compose / CI / scripts / README) — v1 DONE
+- **backend/Dockerfile**: `python:3.11-slim`, venv, system libs (libgomp1, libglib2.0-0,
+  curl); installs CPU torch from the PyTorch CPU index **then** `requirements.lock` (so the
+  pinned torch is already satisfied and never pulls CUDA). **Build-time checkpoint SHA-256
+  gate** fails the build on mismatch (verified the snippet runs: `ff680804…`). Non-root
+  `app` user; uvicorn CMD. `backend/.dockerignore` excludes venv/caches/uploads/results/
+  tests (keeps `checkpoints/`).
+- **frontend/Dockerfile** (P3) + **docker-compose.yml**: backend (8000, healthcheck on
+  /health, `ALLOWED_ORIGINS`) + frontend (3000, `NEXT_PUBLIC_API_URL=localhost:8000` so
+  the browser hits the host-published backend; baked default matches). `docker compose
+  config` validates.
+- **scripts**: `docker_build.sh` / `docker_up.sh` / `docker_down.sh` and `run_local.sh`
+  (in-repo `.venv`, CPU torch, both servers) — all chmod +x.
+- **CI** (`.github/workflows/ci.yml`): backend job (CPU torch + lock + ruff + pytest),
+  frontend job (npm install + lint + test + build), and a docker-build job (needs both;
+  builds both images, exercising the build-time SHA gate). No GPU anywhere.
+- **ruff**: `backend/ruff.toml` (line-length 100, select E/F/W/I, excludes the frozen
+  `vendored/`). Fixed import order in main.py + an unused import in a test; `ruff check`
+  clean.
+- **README**: scope sentence + disclaimer + tier table + locked-knobs note + Docker/local
+  quick-starts + API list + demo-data section with the **NOIRLab acknowledgement** and the
+  no-MeerLICHT statement.
+- Final validation: backend 32 tests pass + ruff clean; frontend lint clean, node tests
+  (4) pass, `npm run build` OK; compose config valid; build-time SHA gate verified.
+  Docker images not built locally (daemon off) — the CI docker-build job covers that.
+- Disclaimer + neutral tiers now present in all five required places: input page, output
+  page, README, `/model`, `stats.json`. **v1 build complete (P1–P4).**

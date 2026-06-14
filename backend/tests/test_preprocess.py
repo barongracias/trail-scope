@@ -13,7 +13,6 @@ from PIL import Image
 
 from trailscope import config
 from trailscope.preprocess import PreprocessError, preprocess_image
-from trailscope.vendored import preprocess_core as core
 
 
 # --------------------------------------------------------------------------------------
