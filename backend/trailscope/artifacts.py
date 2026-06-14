@@ -91,10 +91,13 @@ def _write_png(path: Path, arr: np.ndarray) -> None:
 
 
 def _build_overlay(image_u8: np.ndarray, binary: np.ndarray, hough: np.ndarray | None) -> np.ndarray:
+    # Draw the classical Hough aid first, then the model's predicted mask on top, so the
+    # primary model output stays visible where the two overlap. Kept consistent with the
+    # interactive canvas (CanvasCompare.tsx).
     rgb = np.stack([image_u8, image_u8, image_u8], axis=-1).astype(np.uint8)
-    rgb[binary > 0] = _MASK_RGB
     if hough is not None:
         rgb[hough > 0] = _HOUGH_RGB
+    rgb[binary > 0] = _MASK_RGB
     return rgb
 
 

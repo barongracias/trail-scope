@@ -88,7 +88,8 @@ export default function CanvasCompare({
     ctx.drawImage(base, 0, 0, w, h);
 
     ctx.globalAlpha = opacity;
-    if (showMask && maskTint) ctx.drawImage(maskTint, 0, 0, w, h);
+    // Hough first, then the model's predicted mask on top (consistent with the baked
+    // overlay.png), so the primary model output stays visible where they overlap.
     if (showHough && stats.hough.enabled) {
       ctx.strokeStyle = HOUGH_RGB;
       ctx.lineWidth = 3;
@@ -100,6 +101,7 @@ export default function CanvasCompare({
         ctx.stroke();
       }
     }
+    if (showMask && maskTint) ctx.drawImage(maskTint, 0, 0, w, h);
     ctx.globalAlpha = 1;
   }, [base, maskTint, showMask, showHough, opacity, stats]);
 
