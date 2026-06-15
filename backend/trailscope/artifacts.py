@@ -107,10 +107,12 @@ def run_inference(
     *,
     hough: bool,
     out_dir: str | Path,
+    on_stage: Any = None,
 ) -> dict[str, Any]:
     """Execute inference + rendering for one image, writing artifacts into `out_dir`.
 
-    Returns the stats dict (schema-compatible with `schemas.InferStats`).
+    `on_stage(name)` (optional) is called with "inferring" then "rendering" so the async
+    jobs path can report coarse progress. Returns the stats dict.
     """
     import torch
 
@@ -118,6 +120,8 @@ def run_inference(
     out_dir.mkdir(parents=True, exist_ok=True)
     image_u8 = pre.image_u8
 
+    if on_stage:
+        on_stage("inferring")
     t0 = time.perf_counter()
     # inference_mode is a touch faster than the vendored function's inner no_grad and
     # nests harmlessly; we wrap the call site rather than edit the frozen vendored core.
@@ -125,6 +129,8 @@ def run_inference(
         prob_canvas, _inf_meta = service.infer_probability_canvas(image_u8)
     inference_ms = (time.perf_counter() - t0) * 1000.0
 
+    if on_stage:
+        on_stage("rendering")
     binary = prob_canvas >= config.THRESHOLD
     component_count, components = _component_stats(binary)
 

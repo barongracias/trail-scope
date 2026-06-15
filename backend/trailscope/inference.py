@@ -27,14 +27,55 @@ def _count_trainable_params(model: Any) -> int:
     return int(sum(p.numel() for p in model.parameters() if p.requires_grad))
 
 
+def _maybe_torchscript(model: Any, device: Any) -> tuple[Any, str]:
+    """Optionally TorchScript-trace the model for a CPU speedup.
+
+    The traced module is **verified equivalent** to the eager model on a random patch
+    before use (max abs diff < 1e-4); on any exception or mismatch we fall back to the
+    eager model. The locked U-Net has no input-dependent control flow at the 528×528 patch
+    size (the UpBlock interpolate branch never fires), so tracing is faithful. The
+    checkpoint SHA gate is unaffected — it guards the source weights, not this in-memory
+    derivation.
+    """
+    import logging
+    import warnings
+
+    import torch
+
+    log = logging.getLogger("trailscope")
+    if not config.USE_TORCHSCRIPT:
+        return model, "eager"
+    try:
+        example = torch.zeros(1, 1, config.PATCH_SIZE, config.PATCH_SIZE)
+        with torch.no_grad(), warnings.catch_warnings():
+            # The UpBlock shape check is constant-false at the fixed 528×528 patch size,
+            # so the trace bakes it out; equivalence is verified explicitly below.
+            warnings.simplefilter("ignore", category=torch.jit.TracerWarning)
+            traced = torch.jit.trace(model, example)
+            traced = torch.jit.optimize_for_inference(traced)
+            probe = torch.randn(1, 1, config.PATCH_SIZE, config.PATCH_SIZE)
+            max_diff = float((model(probe) - traced(probe)).abs().max())
+        if max_diff < 1e-4:
+            log.info("TorchScript trace verified (max abs diff %.2e); using torchscript.", max_diff)
+            return traced, "torchscript"
+        log.warning("TorchScript output diverged (max abs diff %.2e); using eager.", max_diff)
+    except Exception as exc:  # pragma: no cover - environment-dependent
+        log.warning("TorchScript trace failed (%s); using eager.", exc)
+    return model, "eager"
+
+
 class ModelService:
     """Holds the single locked U-Net instance and runs the locked inference path."""
 
-    def __init__(self, model: Any, device: Any) -> None:
+    def __init__(
+        self, model: Any, device: Any, *, param_count: int | None = None, backend: str = "eager"
+    ) -> None:
         self.model = model
         self.device = device
-        self.param_count = _count_trainable_params(model)
+        # Param count must come from the eager weights; a traced module reports 0.
+        self.param_count = param_count if param_count is not None else _count_trainable_params(model)
         self.checkpoint_sha256 = config.EXPECTED_CHECKPOINT_SHA256
+        self.backend = backend  # "eager" | "torchscript"
 
     @classmethod
     def load(cls) -> "ModelService":
@@ -69,7 +110,9 @@ class ModelService:
                 f"Locked checkpoint must use normalisation={config.NORMALISATION!r}; "
                 f"got {normalisation!r}."
             )
-        return cls(model, device)
+
+        run_model, backend = _maybe_torchscript(model, device)
+        return cls(run_model, device, param_count=params, backend=backend)
 
     # -- locked inference primitives (used by preprocess.py / artifacts.py) -----------
 

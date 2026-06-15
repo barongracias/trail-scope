@@ -79,10 +79,17 @@ pip install -r backend/requirements.lock
 - `GET /model` → static metadata (architecture, 485,673 params, threshold 0.45, patch
   size, training domain, tier definitions, thesis-repo link, full disclaimer).
 - `POST /infer` — multipart `file` (required), `hough: bool = true`,
-  `pixel_scale_arcsec: float | null`, `hdu_index: int | null`. Synchronous. Returns
-  `{result_id, stats}`.
-- `GET /results/{id}/{input_8bit.png | overlay.png | mask.png | stats.json}` — per-result
-  artifacts (cleared on startup).
+  `pixel_scale_arcsec: float | null`, `hdu_index: int | null`. Synchronous (≤ 64 patches,
+  else 413). Returns `{result_id, stats}`.
+- `POST /inspect` — multipart `file`; lists a FITS file's HDUs for the HDU picker.
+- `POST /jobs` + `GET /jobs/{id}/status` — **opt-in async path** for large/full-frame
+  images (over 64 patches, up to a hard `MAX_JOB_PATCH_BUDGET` ceiling). `/jobs` returns
+  `{job_id}` immediately; poll the status file (`queued → preprocessing → inferring →
+  rendering → done | error`). The model, threshold, and recipe are identical to `/infer`.
+- `GET /results/{id}/{input_8bit.png | overlay.png | mask.png | prob.png |
+  original_preview.png | stats.json | bundle.zip}` — per-result artifacts (cleared on
+  startup, swept by TTL). `prob.png` is a qualitative confidence map; `original_preview.png`
+  appears only when resampling changed the geometry.
 
 ## Demo data
 

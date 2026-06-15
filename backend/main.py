@@ -31,13 +31,21 @@ from starlette.concurrency import run_in_threadpool
 
 from trailscope import artifacts, config
 from trailscope.inference import CheckpointError, ModelService
+from trailscope.jobs import JobManager
 from trailscope.preprocess import (
     PreprocessError,
     is_fits_filename,
     list_fits_hdus,
     preprocess_image,
 )
-from trailscope.schemas import HealthResponse, InferResponse, InspectResponse, ModelResponse
+from trailscope.schemas import (
+    HealthResponse,
+    InferResponse,
+    InspectResponse,
+    JobCreateResponse,
+    JobStatus,
+    ModelResponse,
+)
 
 
 # --------------------------------------------------------------------------------------
@@ -99,15 +107,18 @@ async def lifespan(app: FastAPI):
     _RESULT_CACHE.clear()
     try:
         app.state.model_service = ModelService.load()
+        app.state.job_manager = JobManager(app.state.model_service)
         log_event(
             "startup.model_loaded",
             params=app.state.model_service.param_count,
+            backend=app.state.model_service.backend,
             checkpoint_sha_ok=True,
         )
     except CheckpointError as exc:
         # Refuse to serve inference on SHA mismatch / corruption, but stay up so
         # /health can report the failure honestly (CLAUDE.md rule 4).
         app.state.model_service = None
+        app.state.job_manager = None
         app.state.model_error = str(exc)
         app_logger.error(f"Checkpoint gate failed — inference disabled: {exc}")
     yield
@@ -378,6 +389,52 @@ async def inspect(file: UploadFile = File(...)) -> InspectResponse:
         _active_inspects -= 1
         stored_path.unlink(missing_ok=True)
     return InspectResponse(hdus=hdus)
+
+
+# --------------------------------------------------------------------------------------
+# Async jobs path (opt-in) — full-frame inference beyond the 64-patch synchronous limit.
+# Additive: the synchronous /infer above is unchanged.
+# --------------------------------------------------------------------------------------
+@app.post("/jobs", response_model=JobCreateResponse)
+async def create_job(
+    file: UploadFile = File(...),
+    hough: bool = Form(True),
+    pixel_scale_arcsec: Optional[float] = Form(None),
+    hdu_index: Optional[int] = Form(None),
+) -> JobCreateResponse:
+    """Submit a large image for background inference (up to MAX_JOB_PATCH_BUDGET patches).
+    Returns immediately; poll GET /jobs/{id}/status. Model and threshold are still fixed."""
+    service = getattr(app.state, "model_service", None)
+    job_manager = getattr(app.state, "job_manager", None)
+    if service is None or job_manager is None:
+        raise error_response(503, "Model unavailable: checkpoint failed the integrity gate.")
+
+    _cleanup_old_results()
+    if job_manager.active_count() >= config.MAX_PENDING_JOBS:
+        raise error_response(429, "Too many queued jobs. Retry shortly.")
+
+    stored_path, job_id, original, _digest = await _store_upload(file)
+    job_manager.submit(
+        job_id,
+        stored_path,
+        original,
+        hough=hough,
+        pixel_scale_arcsec=pixel_scale_arcsec,
+        hdu_index=hdu_index,
+    )
+    log_event("job.submitted", job_id=job_id)
+    return JobCreateResponse(job_id=job_id)
+
+
+@app.get("/jobs/{job_id}/status", response_model=JobStatus)
+async def job_status(job_id: str) -> JobStatus:
+    if not _RESULT_ID_RE.match(job_id):
+        raise error_response(404, "Unknown job id")
+    job_manager = getattr(app.state, "job_manager", None)
+    status = job_manager.get_status(job_id) if job_manager else None
+    if status is None:
+        raise error_response(404, "Job not found")
+    return JobStatus(**status)
 
 
 @app.get("/results/{result_id}/{filename}")

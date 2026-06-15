@@ -181,3 +181,29 @@ contract and all honesty guardrails are unchanged.
   `p=…`; cache hit (identical result_id, logged); `bundle.zip` (5 files).
 - **Deferred (L):** #11 async job queue and #12 full-frame >64 patches (depends on #11 and
   relaxes the locked budget) — left out to keep the verified sync path stable.
+
+### 2026-06-16 — remaining roadmap items: #10, #11, #12, #14, v1.4 (built + verified)
+Completed every outstanding roadmap item. Sync /infer path unchanged; honesty guardrails
+and locked invariants intact (the async ceiling and confidence map are not tuning knobs).
+- **v1.4 vendored checksum guard**: `vendored/CHECKSUMS.sha256` + `test_vendored_integrity.py`
+  (re-hashes the 4 frozen files; loud failure on accidental edit). Manifest documents it.
+- **#10 TorchScript**: `_maybe_torchscript` traces the locked model at load,
+  `optimize_for_inference`, and **verifies equivalence** (max abs diff < 1e-4 on a random
+  528² patch) before use; eager fallback on any mismatch/error (`USE_TORCHSCRIPT` env).
+  `ModelService.backend` reports "torchscript"/"eager"; param count read from eager weights.
+- **#14 CI Playwright**: committed `frontend/e2e/smoke.mjs` (drives demo → output, asserts
+  overlay pixels + zero console errors) + a CI `e2e` job (boots backend+frontend, installs
+  chromium, runs it). `npm run test:e2e`; unit `test` still scoped so it ignores e2e.
+- **#11 async jobs + #12 full-frame** (additive): `trailscope/jobs.py` `JobManager` (one CPU
+  worker, `asyncio.Semaphore`, status mirrored to `status.json`); `POST /jobs` →
+  `{job_id}`, `GET /jobs/{id}/status` (queued→preprocessing→inferring→rendering→done|error);
+  `preprocess_image(max_patch_budget=…)` lets the jobs path use `MAX_JOB_PATCH_BUDGET`
+  (256) while sync stays at 64; `artifacts.run_inference(on_stage=…)` reports coarse
+  progress. Pending-jobs cap → 429. Frontend: "Process large images" toggle drives the
+  async submit+poll flow; processing view shows stage · patch count.
+- **Verified**: backend 48 tests + ruff clean; frontend lint + 5 unit tests + build clean;
+  e2e smoke passes (system Chrome). Live: 81-patch image → sync 413, async job completes
+  (preprocessing→inferring·81→rendering→done, 30363 mask px, artifacts served), UI async
+  flow reaches the full-frame output; zero console errors. TorchScript backend active.
+- **All roadmap items now complete** (v1.1–v1.4). Remaining future ideas are only the
+  explicitly out-of-scope ones (threshold slider, benchmarking, etc. — never to build).

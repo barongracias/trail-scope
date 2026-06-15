@@ -114,3 +114,18 @@ class FitsHdu(BaseModel):
 
 class InspectResponse(BaseModel):
     hdus: list[FitsHdu]
+
+
+class JobCreateResponse(BaseModel):
+    job_id: str
+
+
+class JobStatus(BaseModel):
+    job_id: str
+    state: str                       # queued | preprocessing | inferring | rendering | done | error
+    detail: str = ""
+    n_patches: Optional[int] = None
+    result_id: Optional[str] = None
+    stats: Optional[InferStats] = None
+    error: Optional[str] = None
+    status_code: Optional[int] = None

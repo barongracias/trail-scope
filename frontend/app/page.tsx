@@ -7,6 +7,8 @@ import {
   type FitsHdu,
   type InferResponse,
   type Tier,
+  createJob,
+  getJobStatus,
   healthCheck,
   infer,
   inspectFits,
@@ -53,6 +55,7 @@ export default function Page() {
   const [phase, setPhase] = useState<Phase>("input");
   const [file, setFile] = useState<File | null>(null);
   const [hough, setHough] = useState(true);
+  const [largeMode, setLargeMode] = useState(false);
   const [pixelScale, setPixelScale] = useState("");
   const [hduIndex, setHduIndex] = useState("");
   const [hduList, setHduList] = useState<FitsHdu[] | null>(null);
@@ -115,6 +118,16 @@ export default function Page() {
     }
   };
 
+  const handleFailure = (apiErr: ApiError | null, runFile: File) => {
+    if (apiErr?.status === 413) {
+      setReject413(apiErr.message);
+      setCropping(isRaster(runFile));
+    } else {
+      setError(apiErr ? apiErr.message : "Inference failed. Please try again.");
+    }
+    setPhase("input");
+  };
+
   const run = async (runFile: File) => {
     setError(null);
     setReject413(null);
@@ -123,28 +136,49 @@ export default function Page() {
     setHighlight(null);
     setPhase("processing");
     setStage("Preparing image");
+    const opts = {
+      hough,
+      pixelScaleArcsec: pixelScale ? Number(pixelScale) : null,
+      hduIndex: hduIndex ? Number(hduIndex) : null,
+    };
+
+    if (largeMode) {
+      // Async path: submit a job and poll its status (full-frame, > 64 patches).
+      try {
+        const { job_id } = await createJob(runFile, opts);
+        for (let i = 0; i < 1200; i++) {
+          const st = await getJobStatus(job_id);
+          setStage(st.n_patches ? `${st.detail} · ${st.n_patches} patches` : st.detail);
+          if (st.state === "done" && st.result_id && st.stats) {
+            setResult({ result_id: st.result_id, stats: st.stats });
+            setPhase("output");
+            return;
+          }
+          if (st.state === "error") {
+            handleFailure(new ApiError(st.error ?? "Job failed", st.status_code ?? undefined), runFile);
+            return;
+          }
+          await new Promise((r) => setTimeout(r, 700));
+        }
+        handleFailure(new ApiError("Timed out waiting for the job."), runFile);
+      } catch (e) {
+        handleFailure(e instanceof ApiError ? e : null, runFile);
+      }
+      return;
+    }
+
+    // Synchronous path (default, ≤ 64 patches).
     stageTimers.current.forEach(clearTimeout);
     stageTimers.current = [
       window.setTimeout(() => setStage("Running locked U-Net"), 600),
       window.setTimeout(() => setStage("Rendering outputs"), 2500),
     ];
     try {
-      const res = await infer(runFile, {
-        hough,
-        pixelScaleArcsec: pixelScale ? Number(pixelScale) : null,
-        hduIndex: hduIndex ? Number(hduIndex) : null,
-      });
+      const res = await infer(runFile, opts);
       setResult(res);
       setPhase("output");
     } catch (e) {
-      const apiErr = e instanceof ApiError ? e : null;
-      if (apiErr?.status === 413) {
-        setReject413(apiErr.message);
-        setCropping(isRaster(runFile));
-      } else {
-        setError(apiErr ? apiErr.message : "Inference failed. Please try again.");
-      }
-      setPhase("input");
+      handleFailure(e instanceof ApiError ? e : null, runFile);
     } finally {
       stageTimers.current.forEach(clearTimeout);
     }
@@ -178,6 +212,8 @@ export default function Page() {
           chooseFile={chooseFile}
           hough={hough}
           setHough={setHough}
+          largeMode={largeMode}
+          setLargeMode={setLargeMode}
           pixelScale={pixelScale}
           setPixelScale={setPixelScale}
           hduIndex={hduIndex}
@@ -249,6 +285,8 @@ function InputView(props: {
   chooseFile: (f: File | null) => void;
   hough: boolean;
   setHough: (b: boolean) => void;
+  largeMode: boolean;
+  setLargeMode: (b: boolean) => void;
   pixelScale: string;
   setPixelScale: (s: string) => void;
   hduIndex: string;
@@ -266,9 +304,9 @@ function InputView(props: {
   pickDemo: (f: string, label: string) => void;
 }) {
   const {
-    file, chooseFile, hough, setHough, pixelScale, setPixelScale, hduIndex, setHduIndex,
-    hduList, dragging, setDragging, fileInputRef, error, reject413, cropping, setCropping,
-    onRun, onCropped, pickDemo,
+    file, chooseFile, hough, setHough, largeMode, setLargeMode, pixelScale, setPixelScale,
+    hduIndex, setHduIndex, hduList, dragging, setDragging, fileInputRef, error, reject413,
+    cropping, setCropping, onRun, onCropped, pickDemo,
   } = props;
 
   if (cropping && file) {
@@ -378,6 +416,18 @@ function InputView(props: {
             Hough overlay
           </label>
         </div>
+        <label className="mt-4 flex items-start gap-2 text-xs text-slate-600">
+          <input
+            type="checkbox"
+            checked={largeMode}
+            onChange={(e) => setLargeMode(e.target.checked)}
+            className="mt-0.5 h-4 w-4"
+          />
+          <span>
+            Process large images (over 64 patches) as a background job. Slower on CPU and
+            still qualitative — the model, threshold, and recipe are unchanged.
+          </span>
+        </label>
       </Card>
 
       <Card className="bg-slate-50">

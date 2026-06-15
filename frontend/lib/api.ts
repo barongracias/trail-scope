@@ -156,3 +156,50 @@ export function resultUrl(
 ): string {
   return `${baseUrl}/results/${resultId}/${filename}`;
 }
+
+// ---- Async jobs path (opt-in, for large images over the 64-patch sync limit) --------
+
+export type JobState =
+  | "queued"
+  | "preprocessing"
+  | "inferring"
+  | "rendering"
+  | "done"
+  | "error";
+
+export type JobStatus = {
+  job_id: string;
+  state: JobState;
+  detail: string;
+  n_patches: number | null;
+  result_id: string | null;
+  stats: InferStats | null;
+  error: string | null;
+  status_code: number | null;
+};
+
+export async function createJob(
+  file: File,
+  opts: InferOptions,
+  baseUrl: string = API_BASE_URL,
+): Promise<{ job_id: string }> {
+  const form = new FormData();
+  form.append("file", file);
+  form.append("hough", String(opts.hough));
+  if (opts.pixelScaleArcsec != null && !Number.isNaN(opts.pixelScaleArcsec)) {
+    form.append("pixel_scale_arcsec", String(opts.pixelScaleArcsec));
+  }
+  if (opts.hduIndex != null && !Number.isNaN(opts.hduIndex)) {
+    form.append("hdu_index", String(opts.hduIndex));
+  }
+  const res = await fetch(`${baseUrl}/jobs`, { method: "POST", body: form });
+  return handle<{ job_id: string }>(res);
+}
+
+export async function getJobStatus(
+  jobId: string,
+  baseUrl: string = API_BASE_URL,
+): Promise<JobStatus> {
+  const res = await fetch(`${baseUrl}/jobs/${jobId}/status`, { cache: "no-store" });
+  return handle<JobStatus>(res);
+}

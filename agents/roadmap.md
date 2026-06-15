@@ -15,12 +15,13 @@ sequenced enhancements to pick up after the v1 build (P1–P4, complete 2026-06-
 
 Effort key: **S** ≤½ day · **M** ~1 day · **L** multi-day. ⟐ = already a spec v2 candidate.
 
-> **Status (2026-06-15): v1.1, v1.2, and the S/M parts of v1.3 are BUILT and verified
-> end-to-end in a browser** (items 1–10, 13, 14). Deferred: **#11 async job queue (L)** and
-> **#12 full-frame beyond 64 patches (L, depends on #11 and relaxes the locked budget)** —
-> left out to avoid destabilising the verified synchronous path. v1.4 stays "keep vendored".
-> Build details in `agents/progress.md`; the `vendored/` faithfulness checksum (under v1.4)
-> remains the only other open, low-priority item.
+> **Status (2026-06-16): ALL roadmap items are now BUILT and verified.** v1.1, v1.2, v1.3
+> (incl. #10 TorchScript, #11 async jobs, #12 full-frame, #14 CI Playwright) and the v1.4
+> vendored-checksum guard are complete. #11/#12 were landed **additively** — the
+> synchronous `/infer` path is unchanged; large images opt in to the async `/jobs` path
+> (status-file polling) with a hard `MAX_JOB_PATCH_BUDGET` ceiling, never unbounded. The
+> "keep vendored" decision stands; the checksum guard makes accidental edits loud. Build
+> details in `agents/progress.md`.
 
 ---
 

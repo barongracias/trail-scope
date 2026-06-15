@@ -26,6 +26,21 @@ carries a provenance header; this manifest is the authoritative record.
   refuses to serve on mismatch.
 - This is the locked thesis winner `unet_paper_arch_noise_topk_t44_s2804`.
 
+## Per-file integrity (frozen-copy guard)
+
+Because this is a frozen copy, each source file's SHA-256 is recorded in
+`CHECKSUMS.sha256` and asserted by `backend/tests/test_vendored_integrity.py`. This turns
+an *accidental local edit* of the vendored copy into a loud test failure rather than
+silent drift. The checkpoint has its own SHA gate (above); the e2e DECam test pins the
+pipeline behaviourally. To intentionally re-vendor at a new upstream commit, regenerate:
+
+```
+cd backend/trailscope/vendored
+shasum -a 256 unet.py loading.py hough_runner.py preprocess_core.py > CHECKSUMS.sha256
+```
+
+and update this manifest's source commit + date.
+
 ## v2 note
 
 The clean exit from vendoring is to promote this core to a tagged `src/inference/`

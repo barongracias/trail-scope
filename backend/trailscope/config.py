@@ -94,8 +94,17 @@ RESULTS_TTL_SECONDS = int(os.getenv("TRAILSCOPE_RESULTS_TTL", "3600"))
 MAX_CONCURRENT_INFER = int(os.getenv("TRAILSCOPE_MAX_CONCURRENT_INFER", "2"))
 # Best-effort cache: identical (file bytes + options) → reuse the existing result dir.
 DEMO_CACHE_SIZE = int(os.getenv("TRAILSCOPE_DEMO_CACHE_SIZE", "64"))
+# Async jobs path (opt-in, for full-frame work beyond the 64-patch synchronous limit).
+# The synchronous /infer default stays at MAX_PATCH_BUDGET; the async path lifts it to
+# this hard ceiling (RAM/time-bounded), never unbounded.
+MAX_JOB_PATCH_BUDGET = int(os.getenv("TRAILSCOPE_MAX_JOB_PATCH_BUDGET", "256"))
+MAX_CONCURRENT_JOBS = int(os.getenv("TRAILSCOPE_MAX_CONCURRENT_JOBS", "1"))
+MAX_PENDING_JOBS = int(os.getenv("TRAILSCOPE_MAX_PENDING_JOBS", "8"))
 # Longest display edge for the "as uploaded" preview (downsized for transport only).
 PREVIEW_MAX_EDGE = 1200
+# Optionally TorchScript-trace the locked model at load for a CPU speedup; verified
+# equivalent to the eager model before use, with eager fallback on any mismatch/error.
+USE_TORCHSCRIPT = os.getenv("TRAILSCOPE_USE_TORCHSCRIPT", "1") not in ("0", "false", "False")
 
 
 def sha256_file(path: str | Path) -> str:

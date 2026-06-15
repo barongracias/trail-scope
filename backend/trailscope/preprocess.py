@@ -171,11 +171,15 @@ def preprocess_image(
     filename: str,
     pixel_scale_arcsec: float | None = None,
     hdu_index: int | None = None,
+    max_patch_budget: int | None = None,
 ) -> PreprocessResult:
     """Run the full preprocessing contract and return the model-ready 8-bit image.
 
-    Raises ``PreprocessError(413, …)`` when the post-resample patch budget exceeds 64.
+    Raises ``PreprocessError(413, …)`` when the post-resample patch budget exceeds the
+    budget (default ``config.MAX_PATCH_BUDGET`` = 64 for the synchronous path; the async
+    jobs path passes the higher ``config.MAX_JOB_PATCH_BUDGET`` ceiling).
     """
+    budget = config.MAX_PATCH_BUDGET if max_patch_budget is None else max_patch_budget
     t0 = time.perf_counter()
     path = Path(path)
     warnings: list[str] = []
@@ -244,10 +248,10 @@ def preprocess_image(
     # 5) Patch budget AFTER resample — reject 413 over 64.
     padded, _pad_shape, _orig = core.reflect_pad_to_multiple(image_u8)
     n_patches = (padded.shape[0] // config.PATCH_SIZE) * (padded.shape[1] // config.PATCH_SIZE)
-    if n_patches > config.MAX_PATCH_BUDGET:
+    if n_patches > budget:
         raise PreprocessError(
             413,
-            f"Image too large for this demo: {n_patches} patches > {config.MAX_PATCH_BUDGET}. "
+            f"Image too large for this demo: {n_patches} patches > {budget}. "
             "Crop or downsample the image and retry.",
         )
 
