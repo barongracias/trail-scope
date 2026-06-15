@@ -107,6 +107,16 @@ def test_inspect_rejects_non_fits(client):
     assert resp.status_code == 400
 
 
+def test_inspect_concurrency_guard_returns_429(client, monkeypatch):
+    monkeypatch.setattr(config, "MAX_CONCURRENT_INFER", 1)
+    monkeypatch.setattr(main, "_active_inspects", 1)
+    arr = np.ones((32, 32), dtype=np.float32)
+    resp = client.post(
+        "/inspect", files={"file": ("h.fits", _fits_bytes(arr), "application/octet-stream")}
+    )
+    assert resp.status_code == 429
+
+
 def test_concurrency_guard_returns_429(client, monkeypatch):
     # Force the "busy" branch without real concurrency by pinning the active counter.
     monkeypatch.setattr(config, "MAX_CONCURRENT_INFER", 1)

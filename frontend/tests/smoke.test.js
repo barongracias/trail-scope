@@ -19,10 +19,17 @@ test("the disclaimer appears on the input page", () => {
   );
 });
 
-test("vocabulary stays neutral — no trail/detection wording in stats UI", () => {
+test("input page uses 'predicted mask' vocabulary", () => {
   const page = fs.readFileSync(path.join(root, "app", "page.tsx"), "utf8");
   assert.ok(page.includes("Predicted mask"), "uses 'predicted mask' vocabulary");
-  assert.ok(!/\bdetections?\b/i.test(page), "must not use 'detection' wording");
+});
+
+test("no 'detection' wording anywhere in the UI (all app/*.tsx)", () => {
+  const appDir = path.join(root, "app");
+  for (const f of fs.readdirSync(appDir).filter((n) => n.endsWith(".tsx"))) {
+    const src = fs.readFileSync(path.join(appDir, f), "utf8");
+    assert.ok(!/\bdetections?\b/i.test(src), `no 'detection' wording in ${f}`);
+  }
 });
 
 test("the cropped DECam demo asset is shipped", () => {

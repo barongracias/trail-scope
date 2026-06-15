@@ -115,6 +115,7 @@ export default function CanvasCompare({
 
   useEffect(() => {
     let cancelled = false;
+    let loadedBase: ImageBitmap | null = null;
     (async () => {
       try {
         const [b, m, p] = await Promise.all([
@@ -122,16 +123,28 @@ export default function CanvasCompare({
           loadBitmap(maskUrl),
           loadBitmap(probUrl),
         ]);
-        if (cancelled) return;
+        if (cancelled) {
+          // Effect was torn down before the loads finished — release all three.
+          b.close();
+          m.close();
+          p.close();
+          return;
+        }
+        loadedBase = b;
         setBase(b);
+        // mask/prob bitmaps are only used to build the tinted/colourmapped canvases,
+        // so close them immediately; only `base` is retained for redraws.
         setMaskTint(tintMask(m, MASK_RGB));
+        m.close();
         setProb(colourmapProb(p));
+        p.close();
       } catch (e) {
         if (!cancelled) setErr(e instanceof Error ? e.message : "Failed to render overlay");
       }
     })();
     return () => {
       cancelled = true;
+      loadedBase?.close(); // GPU-backed; must be explicitly released on unmount/URL change
     };
   }, [inputUrl, maskUrl, probUrl]);
 

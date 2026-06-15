@@ -130,7 +130,9 @@ def _allowed_origins() -> list[str]:
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_allowed_origins(),
-    allow_credentials=True,
+    # The API is stateless multipart/form-data — no cookies, auth headers, or sessions —
+    # so credentialed cross-origin requests are neither needed nor advertised.
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -189,8 +191,9 @@ _RESULT_ID_RE = re.compile(r"^[0-9a-f]{32}$")
 # Best-effort result cache: (content digest + options) → result_id. Bounded LRU; entries
 # are self-healing (a hit is re-validated against the result dir before reuse).
 _RESULT_CACHE: "OrderedDict[str, str]" = OrderedDict()
-# In-flight /infer count for the concurrency guard (event-loop-serialised int).
+# In-flight counts for the concurrency guards (event-loop-serialised ints).
 _active_infers = 0
+_active_inspects = 0
 
 
 def _cache_get(key: str) -> str | None:
@@ -353,10 +356,18 @@ async def infer(
 async def inspect(file: UploadFile = File(...)) -> InspectResponse:
     """List the HDUs of an uploaded FITS file (for the HDU picker). Stored briefly, then
     deleted; no inference is run."""
+    global _active_inspects
     original = os.path.basename(file.filename or "")
     if not is_fits_filename(original):
         raise error_response(400, "HDU inspection is only available for FITS files.")
     stored_path, _rid, _orig, _digest = await _store_upload(file)
+    # Guard against memory-exhaustion from a burst of concurrent FITS reads (each holds
+    # up to 64 MB while astropy parses it). Check+increment are adjacent (no await
+    # between) so they are atomic under asyncio; the parse is fast so the window is narrow.
+    if _active_inspects >= config.MAX_CONCURRENT_INFER:
+        stored_path.unlink(missing_ok=True)
+        raise error_response(429, "Server busy: too many concurrent inspections. Retry shortly.")
+    _active_inspects += 1
     try:
         hdus = await run_in_threadpool(list_fits_hdus, stored_path, original)
     except PreprocessError as exc:
@@ -364,6 +375,7 @@ async def inspect(file: UploadFile = File(...)) -> InspectResponse:
     except Exception as exc:  # pragma: no cover - defensive
         raise error_response(400, f"Could not read FITS HDUs: {exc}")
     finally:
+        _active_inspects -= 1
         stored_path.unlink(missing_ok=True)
     return InspectResponse(hdus=hdus)
 

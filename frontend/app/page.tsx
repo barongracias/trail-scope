@@ -310,7 +310,7 @@ function InputView(props: {
             ref={fileInputRef}
             type="file"
             className="hidden"
-            accept=".fits,.fit,.fz,.png,.jpg,.jpeg,.tif,.tiff"
+            accept=".fits,.fit,.fits.fz,.png,.jpg,.jpeg,.tif"
             onChange={(e) => chooseFile(e.target.files?.[0] ?? null)}
           />
         </div>
@@ -503,7 +503,7 @@ function OutputView(props: {
             onChange={setShowHough}
             disabled={!stats.hough.enabled}
           />
-          <Toggle color="linear-gradient(90deg,#2563eb,#ef4444)" label="Model confidence" checked={showProb} onChange={setShowProb} />
+          <Toggle color="linear-gradient(90deg,#2563eb,#ef4444)" label="Model confidence (qualitative)" checked={showProb} onChange={setShowProb} />
           <label className="flex items-center gap-2 text-xs text-slate-600">
             <input type="checkbox" checked={compareHough} onChange={(e) => setCompareHough(e.target.checked)} />
             Compare Hough off/on
