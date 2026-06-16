@@ -65,7 +65,8 @@ const isFits = (f: File | null) => !!f && /\.(fits|fit|fits\.fz|fz)$/i.test(f.na
 export default function Page() {
   const [phase, setPhase] = useState<Phase>("input");
   const [file, setFile] = useState<File | null>(null);
-  const [hough, setHough] = useState(true);
+  // Hough is always computed; its display is toggled on the output page.
+  const hough = true;
   const [largeMode, setLargeMode] = useState(false);
   const [pixelScale, setPixelScale] = useState("");
   const [hduIndex, setHduIndex] = useState("");
@@ -259,8 +260,6 @@ export default function Page() {
         <InputView
           file={file}
           chooseFile={chooseFile}
-          hough={hough}
-          setHough={setHough}
           largeMode={largeMode}
           setLargeMode={setLargeMode}
           pixelScale={pixelScale}
@@ -349,8 +348,6 @@ function InfoTip({ text }: { text: string }) {
 function InputView(props: {
   file: File | null;
   chooseFile: (f: File | null) => void;
-  hough: boolean;
-  setHough: (b: boolean) => void;
   largeMode: boolean;
   setLargeMode: (b: boolean) => void;
   pixelScale: string;
@@ -369,7 +366,7 @@ function InputView(props: {
   pickDemo: (f: string) => void;
 }) {
   const {
-    file, chooseFile, hough, setHough, largeMode, setLargeMode, pixelScale, setPixelScale,
+    file, chooseFile, largeMode, setLargeMode, pixelScale, setPixelScale,
     hduIndex, setHduIndex, hduList, dragging, setDragging, fileInputRef, error, reject413,
     cropping, setCropping, onCropped, pickDemo,
   } = props;
@@ -464,9 +461,9 @@ function InputView(props: {
 
       <details className="glass rounded-2xl p-5">
         <summary className="cursor-pointer text-sm font-semibold text-slate-700">
-          Options – pixel scale, FITS HDU, Hough, large images
+          Options – pixel scale, FITS HDU, large images
         </summary>
-        <div className="mt-4 grid gap-4 sm:grid-cols-3">
+        <div className="mt-4 grid gap-4 sm:grid-cols-2">
           <label className="flex flex-col gap-1 text-xs text-slate-600">
             Pixel scale override (arcsec/px)
             <input
@@ -507,10 +504,6 @@ function InputView(props: {
                 className="rounded-md border border-slate-300 px-2 py-1.5 text-sm"
               />
             )}
-          </label>
-          <label className="flex items-end gap-2 text-sm text-slate-700">
-            <input type="checkbox" checked={hough} onChange={(e) => setHough(e.target.checked)} className="h-4 w-4" />
-            Hough overlay
           </label>
         </div>
         <label className="mt-4 flex items-start gap-2 text-xs text-slate-600">
