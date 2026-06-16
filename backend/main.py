@@ -31,7 +31,7 @@ from starlette.concurrency import run_in_threadpool
 
 from trailscope import artifacts, config
 from trailscope.inference import CheckpointError, ModelService
-from trailscope.jobs import JobManager
+from trailscope.jobs import TERMINAL_JOB_STATES, JobManager
 from trailscope.preprocess import (
     PreprocessError,
     is_fits_filename,
@@ -225,20 +225,19 @@ def _cache_put(key: str, result_id: str) -> None:
         _RESULT_CACHE.popitem(last=False)
 
 
-_NON_TERMINAL_JOB_STATES = {"queued", "preprocessing", "inferring", "rendering"}
-
-
 def _dir_has_active_job(d: Path) -> bool:
     """True if the dir holds an async job whose status is non-terminal (still running).
 
     Guards against the TTL sweep deleting an in-flight job dir even when an operator sets
-    RESULTS_TTL_SECONDS below a job's runtime (M1).
+    RESULTS_TTL_SECONDS below a job's runtime (M1). Terminal states are the single source
+    of truth in `jobs.TERMINAL_JOB_STATES`.
     """
     status_file = d / "status.json"
     if not status_file.exists():
         return False
     try:
-        return json.loads(status_file.read_text()).get("state") in _NON_TERMINAL_JOB_STATES
+        state = json.loads(status_file.read_text()).get("state")
+        return state is not None and state not in TERMINAL_JOB_STATES
     except (OSError, json.JSONDecodeError):  # pragma: no cover - defensive
         return False
 

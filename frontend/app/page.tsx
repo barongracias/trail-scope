@@ -580,7 +580,8 @@ function OutputView(props: {
   const mo = stats.model_output;
   const hasOriginal = stats.artifacts.includes("original_preview.png");
 
-  const [tab, setTab] = useState<"Overview" | "Components" | "Provenance" | "Downloads">("Overview");
+  const TABS = ["Overview", "Components", "Provenance", "Downloads"] as const;
+  const [tab, setTab] = useState<(typeof TABS)[number]>("Overview");
   // Shared zoom/pan for the synchronised split-view (model input ↔ overlay).
   const [view, setView] = useState<ViewState>({ scale: 1, tx: 0, ty: 0 });
 
@@ -616,12 +617,23 @@ function OutputView(props: {
       </div>
 
       <div role="tablist" aria-label="Result sections" className="flex gap-1 border-b border-slate-200">
-        {(["Overview", "Components", "Provenance", "Downloads"] as const).map((t) => (
+        {TABS.map((t, i) => (
           <button
             key={t}
+            id={`tab-${t}`}
             role="tab"
             aria-selected={tab === t}
+            aria-controls={`panel-${t}`}
+            tabIndex={tab === t ? 0 : -1}
             onClick={() => setTab(t)}
+            onKeyDown={(e) => {
+              if (e.key === "ArrowRight" || e.key === "ArrowLeft") {
+                e.preventDefault();
+                const next = TABS[(i + (e.key === "ArrowRight" ? 1 : TABS.length - 1)) % TABS.length];
+                setTab(next);
+                document.getElementById(`tab-${next}`)?.focus();
+              }
+            }}
             className={`px-3 py-2 text-sm font-medium transition ${
               tab === t
                 ? "border-b-2 border-blue-600 text-blue-700"
@@ -635,6 +647,7 @@ function OutputView(props: {
       </div>
 
       {tab === "Overview" && (
+        <section id="panel-Overview" role="tabpanel" aria-labelledby="tab-Overview">
         <Card>
           <div className="mb-3 flex flex-wrap items-center gap-4">
             <Toggle color="rgb(255,47,146)" label="Predicted mask" checked={showMask} onChange={setShowMask} />
@@ -728,9 +741,11 @@ function OutputView(props: {
             />
           </dl>
         </Card>
+        </section>
       )}
 
       {tab === "Components" && (
+        <section id="panel-Components" role="tabpanel" aria-labelledby="tab-Components">
         <Card>
           <h2 className="mb-3 text-sm font-semibold text-slate-700">
             Predicted components ({mo.predicted_component_count}) — click a row to highlight on the overlay
@@ -785,9 +800,11 @@ function OutputView(props: {
             </p>
           </div>
         </Card>
+        </section>
       )}
 
       {tab === "Provenance" && (
+        <section id="panel-Provenance" role="tabpanel" aria-labelledby="tab-Provenance">
         <Card>
           <div className="mb-3 flex items-center justify-between">
             <h2 className="text-sm font-semibold text-slate-700">Provenance</h2>
@@ -823,9 +840,11 @@ function OutputView(props: {
             <Stat label="Vendored commit" value={`${stats.provenance.vendored_source_commit.slice(0, 12)}…`} small />
           </dl>
         </Card>
+        </section>
       )}
 
       {tab === "Downloads" && (
+        <section id="panel-Downloads" role="tabpanel" aria-labelledby="tab-Downloads">
         <Card>
           <h2 className="mb-3 text-sm font-semibold text-slate-700">Downloads</h2>
           <div className="flex flex-wrap gap-2">
@@ -849,6 +868,7 @@ function OutputView(props: {
             ))}
           </div>
         </Card>
+        </section>
       )}
 
       <button

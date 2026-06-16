@@ -43,20 +43,22 @@ try {
   await page.waitForSelector("text=Tier:", { timeout: 90000 });
   await page.waitForTimeout(1500);
 
+  // Overview tab (default): tier banner, summary, and the synced split-view canvases.
   const checks = {
     "tier banner": await page.locator("text=/Tier:/").count(),
     "result summary": await page.locator("text=Predicted mask pixels").count(),
-    "components table": await page.locator("text=/Predicted components/").count(),
-    "downloads (zip)": await page.locator("a:has-text('All (.zip)')").count(),
     canvas: await page.locator("canvas").count(),
+    "components tab": await page.locator("[role=tab]:has-text('Components')").count(),
   };
   for (const [k, v] of Object.entries(checks)) {
     if (!v) fail(`missing on output page: ${k}`);
   }
 
-  // The overlay canvas drew coloured (mask/Hough) pixels.
+  // The OVERLAY canvas (the 2nd panel in the split-view) drew coloured mask/Hough pixels.
+  // canvas[0] is the grayscale "Model input" panel.
   const colored = await page.evaluate(() => {
-    const c = document.querySelector("canvas");
+    const canvases = document.querySelectorAll("canvas");
+    const c = canvases[1] || canvases[0];
     if (!c) return 0;
     const d = c.getContext("2d").getImageData(0, 0, c.width, c.height).data;
     let n = 0;
@@ -66,6 +68,13 @@ try {
     return n;
   });
   if (colored <= 0) fail("overlay canvas has no coloured overlay pixels");
+
+  // Downloads tab holds the .zip bundle link.
+  await page.locator("[role=tab]:has-text('Downloads')").click();
+  await page.waitForTimeout(300);
+  if (!(await page.locator("a:has-text('All (.zip)')").count())) {
+    fail("missing zip bundle link in Downloads tab");
+  }
 
   if (errors.length) fail("console errors: " + JSON.stringify(errors));
 

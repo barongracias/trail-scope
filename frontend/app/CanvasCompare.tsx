@@ -125,8 +125,13 @@ export default function CanvasCompare({
   // View is controllable (for synchronised split-view); falls back to internal state.
   const [internalView, setInternalView] = useState<ViewState>({ scale: 1, tx: 0, ty: 0 });
   const view = controlledView ?? internalView;
+  // Resolve functional updaters against a ref to the latest view. In controlled mode
+  // onViewChange takes a plain value (not a functional updater), so without this two
+  // rapid wheel events would both compute from the same stale render-closure view.
+  const viewRef = useRef(view);
+  viewRef.current = view;
   const setView = (u: ViewState | ((v: ViewState) => ViewState)) => {
-    const next = typeof u === "function" ? (u as (v: ViewState) => ViewState)(view) : u;
+    const next = typeof u === "function" ? (u as (v: ViewState) => ViewState)(viewRef.current) : u;
     (onViewChange ?? setInternalView)(next);
   };
   const drag = useRef<{ x: number; y: number; tx: number; ty: number } | null>(null);

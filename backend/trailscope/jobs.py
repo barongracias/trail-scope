@@ -31,7 +31,7 @@ _STAGE_DETAIL = {
     "error": "Failed",
     "cancelled": "Cancelled",
 }
-_TERMINAL = {"done", "error", "cancelled"}
+TERMINAL_JOB_STATES = {"done", "error", "cancelled"}
 
 
 class JobManager:
@@ -44,7 +44,7 @@ class JobManager:
         self._sem = asyncio.Semaphore(config.MAX_CONCURRENT_JOBS)
 
     def active_count(self) -> int:
-        return sum(1 for s in self._status.values() if s.get("state") not in _TERMINAL)
+        return sum(1 for s in self._status.values() if s.get("state") not in TERMINAL_JOB_STATES)
 
     def _write(self, job_id: str, **fields: Any) -> dict[str, Any]:
         st = self._status.setdefault(job_id, {"job_id": job_id})
@@ -130,7 +130,7 @@ class JobManager:
         """
         task = self._tasks.get(job_id)
         st = self._status.get(job_id)
-        if task is None or task.done() or (st and st.get("state") in _TERMINAL):
+        if task is None or task.done() or (st and st.get("state") in TERMINAL_JOB_STATES):
             return False
         task.cancel()
         self._write(job_id, state="cancelled", error="Cancelled by user", status_code=None)
