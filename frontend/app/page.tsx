@@ -402,25 +402,40 @@ function InputView(props: {
           </p>
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
             {DEMOS.map((d) => (
-              <button
-                key={d.file}
-                onClick={() => pickDemo(d.file, d.label)}
-                aria-label={`Run demo: ${d.label} (${d.note})`}
-                className={`group overflow-hidden rounded-lg border bg-white/40 text-left transition hover:ring-2 hover:ring-blue-300 ${
-                  file?.name === d.file ? "border-blue-400 ring-2 ring-blue-300" : "border-white/60"
-                }`}
-              >
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={`/demo/${d.file}`}
-                  alt={`${d.label} — ${d.note}`}
-                  className="h-24 w-full object-cover transition group-hover:scale-[1.03]"
-                />
-                <div className="px-2 py-1.5">
-                  <p className="text-xs font-medium text-slate-700">{d.label}</p>
-                  <p className="text-[10px] text-slate-500">{d.note}</p>
+              <div key={d.file} className="group relative">
+                <button
+                  onClick={() => pickDemo(d.file, d.label)}
+                  aria-label={`Run demo: ${d.label} (${d.note})`}
+                  className={`w-full overflow-hidden rounded-lg border bg-white/40 text-left transition hover:ring-2 hover:ring-blue-300 ${
+                    file?.name === d.file ? "border-blue-400 ring-2 ring-blue-300" : "border-white/60"
+                  }`}
+                >
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={`/demo/${d.file}`}
+                    alt={`${d.label} — ${d.note}`}
+                    className="h-24 w-full object-cover"
+                  />
+                  <div className="px-2 py-1.5">
+                    <p className="text-xs font-medium text-slate-700">{d.label}</p>
+                    <p className="text-[10px] text-slate-500">{d.note}</p>
+                  </div>
+                </button>
+                {/* Enlarged preview on hover/focus. */}
+                <div className="pointer-events-none absolute bottom-full left-1/2 z-20 mb-2 hidden w-64 -translate-x-1/2 group-hover:block group-focus-within:block">
+                  <div className="glass rounded-xl p-1.5 shadow-xl">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={`/demo/${d.file}`}
+                      alt={`${d.label} preview`}
+                      className="w-full rounded-lg border border-white/60 bg-black"
+                    />
+                    <p className="px-1 pt-1 text-[11px] font-medium text-slate-700">
+                      {d.label} · <span className="text-slate-500">{d.note}</span>
+                    </p>
+                  </div>
                 </div>
-              </button>
+              </div>
             ))}
           </div>
           <p className="mt-2 text-[10px] text-slate-400">
