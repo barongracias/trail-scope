@@ -43,12 +43,13 @@ try {
   await page.waitForSelector("text=Tier:", { timeout: 90000 });
   await page.waitForTimeout(1500);
 
-  // Overview tab (default): tier banner, summary, and the synced split-view canvases.
+  // Output page: tier banner, summary, the synced split-view canvases, and the
+  // always-visible predicted-components section.
   const checks = {
     "tier banner": await page.locator("text=/Tier:/").count(),
     "result summary": await page.locator("text=Predicted mask pixels").count(),
     canvas: await page.locator("canvas").count(),
-    "components tab": await page.locator("[role=tab]:has-text('Components')").count(),
+    "components section": await page.locator("text=/Predicted components/").count(),
   };
   for (const [k, v] of Object.entries(checks)) {
     if (!v) fail(`missing on output page: ${k}`);

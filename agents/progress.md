@@ -231,3 +231,24 @@ Seven additive items (roadmap v1.5: 1,2,3,7,8,9,10); guardrails intact.
   browser run of every feature (tabs, legend, synced zoom, per-component conf., cancel,
   gallery) with **zero console errors**. Deferred: #4 shape descriptors, #5 arcsec units,
   #6 confidence histogram.
+
+### 2026-06-16 — v1.6 UI redesign (frosted-glass, minimal, requested UX changes)
+Frontend-only restructure (+1 demo asset); backend/guardrails unchanged.
+- Confidence toggle is now **mutually exclusive** with mask/Hough (can't read the heatmap
+  under them); selecting one clears the other. Compare-Hough disabled in confidence mode.
+- **Input page**: Options collapsed into a dropdown; demo picker is now **clickable
+  thumbnails** (preview + run) incl. a new **"Star field (no streak)"** tough-artefact demo
+  (public DECam, bright stars); Locked model card folded into the collapsed **About** panel;
+  big footer note removed — kept a slim visible disclaimer + NOIRLab credit by the demos
+  (honesty guardrail: disclaimer + tiers still present on the input page via the slim line
+  and About).
+- **Output (inference) page**: title/subtitle removed (images lead); **tier box moved below
+  the images**; **Predicted components** is now an always-visible open dropdown (no tab
+  switching); remaining detail kept as **Provenance/Downloads** tabs; full data/honesty note
+  shown here only.
+- **Aesthetic**: frosted-glass cards (`.glass`: translucent + backdrop-blur) on a soft
+  gradient backdrop; reduced density.
+- Verified in-browser: input thumbnails/dropdowns/disclaimer; output ordering (tier below
+  images), mutual-exclusive toggles (mask+Hough↔confidence), components always-visible,
+  Provenance/Downloads tabs, header gone on output, footer present; e2e smoke updated +
+  passing; zero console errors. Frontend lint + 5 tests + build clean.

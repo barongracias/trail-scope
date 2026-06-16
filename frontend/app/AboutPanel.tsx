@@ -1,14 +1,29 @@
 "use client";
 
+const MODEL_CARD: [string, string][] = [
+  ["Model", "Locked thesis U-Net"],
+  ["Threshold", "0.45"],
+  ["Patch", "528 × 528"],
+  ["Training domain", "MeerLICHT 8-bit display PNG patches"],
+];
+
 // Collapsible "About this demo" explainer — gives a first-time visitor honest context for
-// the locked detector and the neutral tiers, and links the thesis. No performance claims.
+// the locked detector and the neutral tiers, the locked model card, and links the thesis.
 export default function AboutPanel() {
   return (
-    <details className="rounded-xl border border-slate-200 bg-white p-5 text-sm text-slate-700 shadow-sm">
+    <details className="glass rounded-2xl p-5 text-sm text-slate-700">
       <summary className="cursor-pointer font-semibold text-slate-800">
         About this demo & method
       </summary>
       <div className="mt-3 space-y-3 leading-relaxed">
+        <dl className="grid grid-cols-2 gap-x-6 gap-y-1 rounded-lg bg-white/50 p-3 text-xs sm:grid-cols-4">
+          {MODEL_CARD.map(([k, v]) => (
+            <div key={k}>
+              <dt className="text-slate-500">{k}</dt>
+              <dd className="font-medium text-slate-800">{v}</dd>
+            </div>
+          ))}
+        </dl>
         <p>
           trail-scope runs a <strong>locked U-Net</strong> (485,673 parameters) trained on
           MeerLICHT 8-bit display-PNG patches, followed by an optional probabilistic Hough
