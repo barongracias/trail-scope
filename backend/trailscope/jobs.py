@@ -29,8 +29,9 @@ _STAGE_DETAIL = {
     "rendering": "Rendering outputs",
     "done": "Done",
     "error": "Failed",
+    "cancelled": "Cancelled",
 }
-_TERMINAL = {"done", "error"}
+_TERMINAL = {"done", "error", "cancelled"}
 
 
 class JobManager:
@@ -108,12 +109,32 @@ class JobManager:
                 )
                 self._write(job_id, state="done", result_id=job_id, stats=stats,
                             n_patches=pre.n_patches)
+        except asyncio.CancelledError:
+            # Cancellation is delivered at the next await boundary; the in-flight
+            # threadpool computation finishes in the background but its result is dropped.
+            self._write(job_id, state="cancelled", error="Cancelled by user")
+            raise
         except PreprocessError as exc:
             self._write(job_id, state="error", error=exc.detail, status_code=exc.status_code)
         except Exception as exc:  # pragma: no cover - defensive
             self._write(job_id, state="error", error=str(exc), status_code=500)
         finally:
             Path(stored_path).unlink(missing_ok=True)
+
+    def cancel(self, job_id: str) -> bool:
+        """Request cancellation of a running job. Returns True if it was cancellable.
+
+        The asyncio task is cancelled (CancelledError raises at its next await); any
+        CPU work already running in the worker thread runs to completion in the background
+        but its result is discarded. Status flips to 'cancelled' optimistically.
+        """
+        task = self._tasks.get(job_id)
+        st = self._status.get(job_id)
+        if task is None or task.done() or (st and st.get("state") in _TERMINAL):
+            return False
+        task.cancel()
+        self._write(job_id, state="cancelled", error="Cancelled by user", status_code=None)
+        return True
 
     def get_status(self, job_id: str) -> dict[str, Any] | None:
         if job_id in self._status:

@@ -30,7 +30,9 @@ _MASK_RGB = (255, 47, 146)
 _HOUGH_RGB = (0, 200, 255)
 
 
-def _component_stats(binary: np.ndarray) -> tuple[int, list[dict[str, Any]]]:
+def _component_stats(
+    binary: np.ndarray, prob_canvas: np.ndarray
+) -> tuple[int, list[dict[str, Any]]]:
     """Connected-component stats with an ellipse fit only when ≥5 boundary points.
 
     Returns (component_count, components) sorted by pixel_count descending. Components
@@ -58,12 +60,19 @@ def _component_stats(binary: np.ndarray) -> tuple[int, list[dict[str, Any]]]:
             major_axis_px = float(max(axis_a, axis_b))
             orientation_deg = float(angle)
 
+        # Model confidence within this component's pixels (sampled from the prob canvas).
+        comp_probs = prob_canvas[labels == label]
+        mean_probability = float(comp_probs.mean()) if comp_probs.size else 0.0
+        max_probability = float(comp_probs.max()) if comp_probs.size else 0.0
+
         components.append(
             {
                 "pixel_count": area,
                 "bbox": [x, y, w, h],
                 "major_axis_px": major_axis_px,
                 "orientation_deg": orientation_deg,
+                "mean_probability": mean_probability,
+                "max_probability": max_probability,
             }
         )
 
@@ -78,6 +87,8 @@ def _component_stats(binary: np.ndarray) -> tuple[int, list[dict[str, Any]]]:
             "bbox": c["bbox"],
             "major_axis_px": c["major_axis_px"],
             "orientation_deg": c["orientation_deg"],
+            "mean_probability": c["mean_probability"],
+            "max_probability": c["max_probability"],
         }
         for c in components
     ]
@@ -131,7 +142,7 @@ def run_inference(
     if on_stage:
         on_stage("rendering")
     binary = prob_canvas >= config.THRESHOLD
-    component_count, components = _component_stats(binary)
+    component_count, components = _component_stats(binary, prob_canvas)
 
     hough_ms = 0.0
     hough_mask: np.ndarray | None = None

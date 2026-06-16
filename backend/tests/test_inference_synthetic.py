@@ -46,10 +46,14 @@ def test_tiny_component_returns_null_ellipse() -> None:
     # A 3-pixel blob has < 5 boundary points → no ellipse fit (nulls, not fake values).
     binary = np.zeros((100, 100), dtype=bool)
     binary[10, 10:13] = True
-    count, comps = artifacts._component_stats(binary)
+    prob = binary.astype(np.float32) * 0.6
+    count, comps = artifacts._component_stats(binary, prob)
     assert count == 1
     assert comps[0]["major_axis_px"] is None
     assert comps[0]["orientation_deg"] is None
+    # Confidence within the component reflects the prob canvas there.
+    assert abs(comps[0]["mean_probability"] - 0.6) < 1e-5
+    assert abs(comps[0]["max_probability"] - 0.6) < 1e-5
 
 
 def test_elongated_component_fits_ellipse() -> None:
@@ -58,8 +62,10 @@ def test_elongated_component_fits_ellipse() -> None:
         (img := np.zeros((200, 200), np.uint8)), (20, 20), (180, 160), 255, 3
     )
     binary |= img > 0
-    count, comps = artifacts._component_stats(binary)
+    prob = binary.astype(np.float32) * 0.9
+    count, comps = artifacts._component_stats(binary, prob)
     assert count == 1
     assert comps[0]["major_axis_px"] is not None
     assert comps[0]["orientation_deg"] is not None
     assert comps[0]["major_axis_px"] > 100  # roughly the line length
+    assert comps[0]["max_probability"] > 0.0

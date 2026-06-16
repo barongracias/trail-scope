@@ -201,6 +201,55 @@ is the only future work, and it is low-priority.
 
 ---
 
+## Phase v1.5 — interpretability, honest stats, and UX depth (COMPLETE 2026-06-16)
+
+Additive polish after the roadmap's core was completed. Same guardrails: qualitative only,
+no accuracy/benchmark/tuning, "predicted mask/component" vocabulary, locked invariants.
+**Status: all seven items (1, 2, 3, 7, 8, 9, 10) built and browser-verified, zero console
+errors. Deferred sub-items #4/#5/#6 remain noted below.**
+
+### v1.5-1. Confidence colourbar/legend — S (frontend)
+The `prob.png` heatmap ships with no visible scale. Add a 0→1 colourbar (matching the
+canvas blue→red colourmap exactly) beside the overlay when "Model confidence" is on, so the
+map is interpretable. Pairs with the existing cursor `p=…` readout.
+
+### v1.5-2. About / method explainer — S (frontend)
+A collapsible "About this demo" panel: one honest paragraph on the locked U-Net + Hough
+pipeline, the MeerLICHT training domain, the three tiers, the thesis link, and the
+disclaimer. Gives a first-time visitor context; reinforces the honesty framing.
+
+### v1.5-3. Per-component confidence — S (backend + frontend)
+Each predicted component already reports pixels/bbox/major-axis/orientation. Add **mean and
+max model probability within the component's pixels** (sampled from the prob canvas — pass
+it into `_component_stats`). New `PredictedComponent` fields `mean_probability`,
+`max_probability`; two more columns in the components table. Honest model-output detail, no
+"trail" claim.
+
+### v1.5-7. Cancel a running async job — S (backend + frontend)
+`DELETE /jobs/{id}` cancels the asyncio task (new terminal state `cancelled`);
+`JobManager.cancel`. Frontend: a Cancel button in the processing view during large-mode
+runs. Closes the gap that a multi-minute 256-patch job can't be stopped.
+
+### v1.5-8. Accessibility + responsive pass — S (frontend)
+ARIA labels on icon-only buttons and sliders, keyboard operability for toggles/tabs, focus
+states, and a mobile-layout check (the output grid is desktop-first). No new features —
+quality only.
+
+### v1.5-9. Tabbed output + synchronized split-view — M (frontend)
+The output page is dense. Group it into tabs (Overview / Components / Provenance /
+Downloads). Make the comparison a **synchronized split-view**: lift the zoom/pan state out
+of `CanvasCompare` so the model-input and overlay panels zoom/pan together (render the
+model-input panel as a base-only `CanvasCompare`). The "as uploaded" preview stays a static
+panel (different resolution).
+
+### v1.5-10. Demo gallery — S (assets)
+Ship 2–3 small cropped 8-bit PNGs from additional public DECam frames (via
+`download_demo_assets.py`), keeping the in-repo total small. The picker already supports
+multiple entries. NOIRLab acknowledgement unchanged; never MeerLICHT.
+
+**Deferred from the original list (not in this slice):** #4 extra shape descriptors,
+#5 physical-unit (arcsec) measurements, #6 confidence histogram. Reconsider after v1.5.
+
 ## Explicitly NOT planned (would break scope — do not build)
 Threshold slider on uploads; any precision/recall/accuracy or benchmark output; a
 model-selection dropdown; exposing Hough/stretch/patch params as knobs; "detection"/"trail"

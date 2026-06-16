@@ -61,6 +61,8 @@ class PredictedComponent(BaseModel):
     bbox: list[int]                       # [x, y, w, h]
     major_axis_px: Optional[float]
     orientation_deg: Optional[float]
+    mean_probability: float = 0.0         # model confidence within the component's pixels
+    max_probability: float = 0.0
 
 
 class ModelOutput(BaseModel):

@@ -7,6 +7,7 @@ import {
   type FitsHdu,
   type InferResponse,
   type Tier,
+  cancelJob,
   createJob,
   getJobStatus,
   healthCheck,
@@ -14,7 +15,9 @@ import {
   inspectFits,
   resultUrl,
 } from "@/lib/api";
-import CanvasCompare, { type ProbHover } from "./CanvasCompare";
+import CanvasCompare, { type ProbHover, type ViewState } from "./CanvasCompare";
+import ConfidenceLegend from "./ConfidenceLegend";
+import AboutPanel from "./AboutPanel";
 import CropView from "./CropView";
 
 const MODEL_CARD = [
@@ -41,7 +44,11 @@ const TIER_TEXT: Record<Tier, string> = {
 const TIER_DEFS =
   "in_domain_like: 8-bit display image at a plausible scale.\nrecipe_matched: FITS with a header-resolved pixel scale (the validated DECam recipe).\nbest_effort: everything else (e.g. unknown pixel scale — the model is not scale-invariant).";
 
-const DEMOS = [{ label: "DECam — NAVSTAR-70 (crop)", file: "decam_navstar70_crop.png" }];
+const DEMOS = [
+  { label: "DECam — NAVSTAR-70", file: "decam_navstar70_crop.png" },
+  { label: "DECam — STARLINK-2600", file: "decam_starlink2600_crop.png" },
+  { label: "DECam — DELTA-2 R/B", file: "decam_delta2_crop.png" },
+];
 
 type Phase = "input" | "processing" | "output";
 
@@ -66,6 +73,8 @@ export default function Page() {
   const [stage, setStage] = useState("Preparing image");
   const [result, setResult] = useState<InferResponse | null>(null);
   const [backendDown, setBackendDown] = useState(false);
+  const [jobId, setJobId] = useState<string | null>(null);
+  const cancelledRef = useRef(false);
 
   // Output overlay controls.
   const [showMask, setShowMask] = useState(true);
@@ -144,25 +153,34 @@ export default function Page() {
 
     if (largeMode) {
       // Async path: submit a job and poll its status (full-frame, > 64 patches).
+      cancelledRef.current = false;
       try {
         const { job_id } = await createJob(runFile, opts);
+        setJobId(job_id);
         for (let i = 0; i < 1200; i++) {
+          if (cancelledRef.current) return; // user cancelled; UI already reset
           const st = await getJobStatus(job_id);
           setStage(st.n_patches ? `${st.detail} · ${st.n_patches} patches` : st.detail);
           if (st.state === "done" && st.result_id && st.stats) {
+            setJobId(null);
             setResult({ result_id: st.result_id, stats: st.stats });
             setPhase("output");
             return;
           }
-          if (st.state === "error") {
-            handleFailure(new ApiError(st.error ?? "Job failed", st.status_code ?? undefined), runFile);
+          if (st.state === "error" || st.state === "cancelled") {
+            setJobId(null);
+            if (st.state === "cancelled") {
+              setPhase("input");
+            } else {
+              handleFailure(new ApiError(st.error ?? "Job failed", st.status_code ?? undefined), runFile);
+            }
             return;
           }
           await new Promise((r) => setTimeout(r, 700));
         }
         handleFailure(new ApiError("Timed out waiting for the job."), runFile);
       } catch (e) {
-        handleFailure(e instanceof ApiError ? e : null, runFile);
+        if (!cancelledRef.current) handleFailure(e instanceof ApiError ? e : null, runFile);
       }
       return;
     }
@@ -190,6 +208,19 @@ export default function Page() {
     setError(null);
     setReject413(null);
     setPhase("input");
+  };
+
+  const cancelRun = async () => {
+    cancelledRef.current = true;
+    setPhase("input");
+    if (jobId) {
+      try {
+        await cancelJob(jobId);
+      } catch {
+        /* best-effort */
+      }
+      setJobId(null);
+    }
   };
 
   return (
@@ -235,7 +266,13 @@ export default function Page() {
         />
       )}
 
-      {phase === "processing" && <ProcessingView filename={file?.name ?? ""} stage={stage} />}
+      {phase === "processing" && (
+        <ProcessingView
+          filename={file?.name ?? ""}
+          stage={stage}
+          onCancel={largeMode ? cancelRun : undefined}
+        />
+      )}
 
       {phase === "output" && result && (
         <OutputView
@@ -335,7 +372,16 @@ function InputView(props: {
             if (e.dataTransfer.files?.[0]) chooseFile(e.dataTransfer.files[0]);
           }}
           onClick={() => fileInputRef.current?.click()}
-          className={`flex cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed px-6 py-10 text-center transition ${
+          role="button"
+          tabIndex={0}
+          aria-label="Upload an image: drag and drop, click to browse, or paste from clipboard"
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              fileInputRef.current?.click();
+            }
+          }}
+          className={`flex cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed px-6 py-10 text-center transition focus:outline focus:outline-2 focus:outline-blue-400 ${
             dragging ? "border-blue-400 bg-blue-50" : "border-slate-300 hover:border-slate-400"
           }`}
         >
@@ -442,6 +488,8 @@ function InputView(props: {
         </dl>
       </Card>
 
+      <AboutPanel />
+
       {reject413 && !cropping && (
         <div className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800">
           {reject413}
@@ -467,20 +515,38 @@ function InputView(props: {
   );
 }
 
-function ProcessingView({ filename, stage }: { filename: string; stage: string }) {
+function ProcessingView({
+  filename,
+  stage,
+  onCancel,
+}: {
+  filename: string;
+  stage: string;
+  onCancel?: () => void;
+}) {
   return (
     <Card className="flex flex-col items-center gap-4 py-12 text-center">
-      <Loader2 className="h-8 w-8 animate-spin text-blue-600" />
-      <div>
+      <Loader2 className="h-8 w-8 animate-spin text-blue-600" aria-hidden="true" />
+      <div role="status" aria-live="polite">
         <p className="text-sm font-medium text-slate-700">{filename}</p>
         <p className="mt-1 text-sm text-slate-500">{stage}…</p>
       </div>
       <p className="max-w-md text-xs text-slate-400">
-        Large images may take up to a minute on CPU. Images over 64 patches are rejected in this demo.
+        {onCancel
+          ? "Large images run as a background job and may take a while on CPU."
+          : "Large images may take up to a minute on CPU. Images over 64 patches are rejected in this demo."}
       </p>
       <p className="max-w-md text-xs text-slate-400">
         The model and threshold are fixed; this run does not tune parameters or estimate accuracy.
       </p>
+      {onCancel && (
+        <button
+          onClick={onCancel}
+          className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100"
+        >
+          Cancel
+        </button>
+      )}
     </Card>
   );
 }
@@ -514,6 +580,10 @@ function OutputView(props: {
   const mo = stats.model_output;
   const hasOriginal = stats.artifacts.includes("original_preview.png");
 
+  const [tab, setTab] = useState<"Overview" | "Components" | "Provenance" | "Downloads">("Overview");
+  // Shared zoom/pan for the synchronised split-view (model input ↔ overlay).
+  const [view, setView] = useState<ViewState>({ scale: 1, tx: 0, ty: 0 });
+
   const canvasProps = {
     inputUrl: resultUrl(result_id, "input_8bit.png"),
     maskUrl: resultUrl(result_id, "mask.png"),
@@ -521,6 +591,8 @@ function OutputView(props: {
     stats,
     opacity,
     highlight,
+    view,
+    onViewChange: setView,
   };
 
   return (
@@ -543,89 +615,179 @@ function OutputView(props: {
         )}
       </div>
 
-      <Card>
-        <div className="mb-3 flex flex-wrap items-center gap-4">
-          <Toggle color="rgb(255,47,146)" label="Predicted mask" checked={showMask} onChange={setShowMask} />
-          <Toggle
-            color="rgb(0,200,255)"
-            label={`Hough overlay${stats.hough.enabled ? "" : " (off)"}`}
-            checked={showHough}
-            onChange={setShowHough}
-            disabled={!stats.hough.enabled}
-          />
-          <Toggle color="linear-gradient(90deg,#2563eb,#ef4444)" label="Model confidence (qualitative)" checked={showProb} onChange={setShowProb} />
-          <label className="flex items-center gap-2 text-xs text-slate-600">
-            <input type="checkbox" checked={compareHough} onChange={(e) => setCompareHough(e.target.checked)} />
-            Compare Hough off/on
-          </label>
-          <label className="ml-auto flex items-center gap-2 text-xs text-slate-600">
-            Overlay opacity
-            <input type="range" min={0} max={1} step={0.05} value={opacity} onChange={(e) => setOpacity(Number(e.target.value))} />
-          </label>
-        </div>
+      <div role="tablist" aria-label="Result sections" className="flex gap-1 border-b border-slate-200">
+        {(["Overview", "Components", "Provenance", "Downloads"] as const).map((t) => (
+          <button
+            key={t}
+            role="tab"
+            aria-selected={tab === t}
+            onClick={() => setTab(t)}
+            className={`px-3 py-2 text-sm font-medium transition ${
+              tab === t
+                ? "border-b-2 border-blue-600 text-blue-700"
+                : "text-slate-500 hover:text-slate-700"
+            }`}
+          >
+            {t}
+            {t === "Components" ? ` (${mo.predicted_component_count})` : ""}
+          </button>
+        ))}
+      </div>
 
-        {compareHough ? (
-          <div className="grid gap-3 sm:grid-cols-2">
-            <figure>
-              <figcaption className="mb-1 text-xs text-slate-500">Hough off</figcaption>
-              <CanvasCompare {...canvasProps} showMask={showMask} showHough={false} showProb={showProb} />
-            </figure>
-            <figure>
-              <figcaption className="mb-1 text-xs text-slate-500">Hough on</figcaption>
-              <CanvasCompare {...canvasProps} showMask={showMask} showHough={true} showProb={showProb} />
-            </figure>
+      {tab === "Overview" && (
+        <Card>
+          <div className="mb-3 flex flex-wrap items-center gap-4">
+            <Toggle color="rgb(255,47,146)" label="Predicted mask" checked={showMask} onChange={setShowMask} />
+            <Toggle
+              color="rgb(0,200,255)"
+              label={`Hough overlay${stats.hough.enabled ? "" : " (off)"}`}
+              checked={showHough}
+              onChange={setShowHough}
+              disabled={!stats.hough.enabled}
+            />
+            <Toggle color="linear-gradient(90deg,#2563eb,#ef4444)" label="Model confidence (qualitative)" checked={showProb} onChange={setShowProb} />
+            {showProb && <ConfidenceLegend />}
+            <label className="flex items-center gap-2 text-xs text-slate-600">
+              <input type="checkbox" checked={compareHough} onChange={(e) => setCompareHough(e.target.checked)} />
+              Compare Hough off/on
+            </label>
+            <label className="ml-auto flex items-center gap-2 text-xs text-slate-600">
+              Overlay opacity
+              <input
+                type="range"
+                min={0}
+                max={1}
+                step={0.05}
+                value={opacity}
+                aria-label="Overlay opacity"
+                onChange={(e) => setOpacity(Number(e.target.value))}
+              />
+            </label>
           </div>
-        ) : (
-          <div className={`grid gap-3 ${hasOriginal ? "sm:grid-cols-3" : "sm:grid-cols-2"}`}>
-            {hasOriginal && (
+
+          {compareHough ? (
+            <div className="grid gap-3 sm:grid-cols-2">
               <figure>
-                <figcaption className="mb-1 text-xs text-slate-500">As uploaded (pre-resample)</figcaption>
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={resultUrl(result_id, "original_preview.png")}
-                  alt="As uploaded"
-                  className="w-full rounded-lg border border-slate-300 bg-black"
+                <figcaption className="mb-1 text-xs text-slate-500">Hough off</figcaption>
+                <CanvasCompare {...canvasProps} showMask={showMask} showHough={false} showProb={showProb} />
+              </figure>
+              <figure>
+                <figcaption className="mb-1 text-xs text-slate-500">Hough on</figcaption>
+                <CanvasCompare {...canvasProps} showMask={showMask} showHough={true} showProb={showProb} />
+              </figure>
+            </div>
+          ) : (
+            <div className={`grid gap-3 ${hasOriginal ? "lg:grid-cols-3 sm:grid-cols-2" : "sm:grid-cols-2"}`}>
+              {hasOriginal && (
+                <figure>
+                  <figcaption className="mb-1 text-xs text-slate-500">As uploaded (pre-resample)</figcaption>
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={resultUrl(result_id, "original_preview.png")}
+                    alt="The image as uploaded, before resampling"
+                    className="w-full rounded-lg border border-slate-300 bg-black"
+                  />
+                </figure>
+              )}
+              <figure>
+                <figcaption className="mb-1 text-xs text-slate-500">Model input (zoom/pan synced)</figcaption>
+                <CanvasCompare {...canvasProps} showMask={false} showHough={false} showProb={false} />
+              </figure>
+              <figure>
+                <figcaption className="mb-1 flex items-center justify-between text-xs text-slate-500">
+                  <span>Overlay (scroll to zoom · drag to pan)</span>
+                  {probHover && (
+                    <span className="font-mono text-slate-600">
+                      p={probHover.p.toFixed(3)} @ ({probHover.x},{probHover.y})
+                    </span>
+                  )}
+                </figcaption>
+                <CanvasCompare
+                  {...canvasProps}
+                  showMask={showMask}
+                  showHough={showHough}
+                  showProb={showProb}
+                  onProbHover={setProbHover}
                 />
               </figure>
-            )}
-            <figure>
-              <figcaption className="mb-1 text-xs text-slate-500">Model input (what the model saw)</figcaption>
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={resultUrl(result_id, "input_8bit.png")}
-                alt="Model input"
-                className="w-full rounded-lg border border-slate-300 bg-black"
-              />
-            </figure>
-            <figure>
-              <figcaption className="mb-1 flex items-center justify-between text-xs text-slate-500">
-                <span>Overlay (scroll to zoom · drag to pan)</span>
-                {probHover && <span className="font-mono text-slate-600">p={probHover.p.toFixed(3)} @ ({probHover.x},{probHover.y})</span>}
-              </figcaption>
-              <CanvasCompare {...canvasProps} showMask={showMask} showHough={showHough} showProb={showProb} onProbHover={setProbHover} />
-            </figure>
-          </div>
-        )}
-      </Card>
+            </div>
+          )}
 
-      <div className="grid gap-5 lg:grid-cols-2">
-        <Card>
-          <h2 className="mb-3 text-sm font-semibold text-slate-700">Result summary</h2>
-          <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
-            <Stat label="Predicted mask pixels" value={fmt(mo.predicted_mask_pixel_count)} />
-            <Stat label="Predicted mask fraction" value={mo.predicted_mask_fraction.toExponential(2)} />
-            <Stat label="Predicted components" value={fmt(mo.predicted_component_count)} />
-            <Stat label="Max model probability" value={mo.max_model_probability.toFixed(4)} />
-            <Stat label="Hough segments" value={fmt(stats.hough.segment_count)} />
-            <Stat label="Processed shape" value={stats.image.processed_shape.join(" × ")} />
-            <Stat label="Patches" value={fmt(stats.image.n_patches)} />
+          <dl className="mt-5 grid grid-cols-2 gap-x-4 gap-y-2 border-t border-slate-100 pt-4 text-sm sm:grid-cols-4">
+            <Stat label="Predicted mask pixels" value={fmt(mo.predicted_mask_pixel_count)} small />
+            <Stat label="Predicted mask fraction" value={mo.predicted_mask_fraction.toExponential(2)} small />
+            <Stat label="Predicted components" value={fmt(mo.predicted_component_count)} small />
+            <Stat label="Max model probability" value={mo.max_model_probability.toFixed(4)} small />
+            <Stat label="Hough segments" value={fmt(stats.hough.segment_count)} small />
+            <Stat label="Processed shape" value={stats.image.processed_shape.join(" × ")} small />
+            <Stat label="Patches" value={fmt(stats.image.n_patches)} small />
             <Stat
               label="Runtime"
               value={`${fmt(stats.timing_ms.preprocess + stats.timing_ms.inference + stats.timing_ms.hough)} ms`}
+              small
             />
           </dl>
         </Card>
+      )}
 
+      {tab === "Components" && (
+        <Card>
+          <h2 className="mb-3 text-sm font-semibold text-slate-700">
+            Predicted components ({mo.predicted_component_count}) — click a row to highlight on the overlay
+          </h2>
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs">
+              <thead className="text-slate-500">
+                <tr>
+                  <th className="py-1 pr-3">#</th>
+                  <th className="py-1 pr-3">Pixels</th>
+                  <th className="py-1 pr-3">bbox [x,y,w,h]</th>
+                  <th className="py-1 pr-3">Major axis (px)</th>
+                  <th className="py-1 pr-3">Orientation (°)</th>
+                  <th className="py-1 pr-3">Mean conf.</th>
+                  <th className="py-1 pr-3">Max conf.</th>
+                </tr>
+              </thead>
+              <tbody>
+                {mo.predicted_components.slice(0, 50).map((c) => (
+                  <tr
+                    key={c.index}
+                    tabIndex={0}
+                    aria-label={`Component ${c.index}, ${c.pixel_count} pixels`}
+                    onClick={() => setHighlight(highlight === c.index ? null : c.index)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        setHighlight(highlight === c.index ? null : c.index);
+                      }
+                    }}
+                    className={`cursor-pointer border-t border-slate-100 focus:outline focus:outline-2 focus:outline-blue-400 ${
+                      highlight === c.index ? "bg-yellow-100" : "hover:bg-slate-50"
+                    }`}
+                  >
+                    <td className="py-1 pr-3">{c.index}</td>
+                    <td className="py-1 pr-3">{fmt(c.pixel_count)}</td>
+                    <td className="py-1 pr-3">[{c.bbox.join(", ")}]</td>
+                    <td className="py-1 pr-3">{c.major_axis_px != null ? c.major_axis_px.toFixed(1) : "—"}</td>
+                    <td className="py-1 pr-3">{c.orientation_deg != null ? c.orientation_deg.toFixed(1) : "—"}</td>
+                    <td className="py-1 pr-3">{c.mean_probability.toFixed(3)}</td>
+                    <td className="py-1 pr-3">{c.max_probability.toFixed(3)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {mo.predicted_components.length === 0 && (
+              <p className="py-2 text-xs text-slate-500">No predicted components.</p>
+            )}
+            <p className="mt-2 text-[11px] text-slate-400">
+              &quot;Confidence&quot; is the model&apos;s probability within the component&apos;s pixels — a
+              qualitative model output, not a likelihood that a real object is present.
+            </p>
+          </div>
+        </Card>
+      )}
+
+      {tab === "Provenance" && (
         <Card>
           <div className="mb-3 flex items-center justify-between">
             <h2 className="text-sm font-semibold text-slate-700">Provenance</h2>
@@ -635,13 +797,14 @@ function OutputView(props: {
                 setCopied(true);
                 window.setTimeout(() => setCopied(false), 1500);
               }}
+              aria-label="Copy provenance JSON to clipboard"
               className="inline-flex items-center gap-1 rounded border border-slate-300 px-2 py-1 text-xs text-slate-600 hover:bg-slate-100"
             >
-              <Copy className="h-3 w-3" />
+              <Copy className="h-3 w-3" aria-hidden="true" />
               {copied ? "Copied" : "Copy"}
             </button>
           </div>
-          <dl className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-xs">
+          <dl className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-xs sm:grid-cols-3">
             <Stat label="Format" value={stats.provenance.format} small />
             <Stat label="HDU" value={stats.provenance.hdu ?? "—"} small />
             <Stat label="Stretch" value={stats.provenance.stretch} small />
@@ -654,72 +817,39 @@ function OutputView(props: {
             />
             <Stat label="Resample factor" value={stats.provenance.resample_factor.toFixed(4)} small />
             <Stat label="Threshold" value={stats.provenance.threshold.toString()} small />
+            <Stat label="RGB→luminance" value={String(stats.provenance.rgb_to_luminance)} small />
+            <Stat label="Non-finite cleaned" value={fmt(stats.provenance.nonfinite_pixels_cleaned)} small />
             <Stat label="Checkpoint SHA" value={`${stats.provenance.checkpoint_sha256.slice(0, 12)}…`} small />
             <Stat label="Vendored commit" value={`${stats.provenance.vendored_source_commit.slice(0, 12)}…`} small />
           </dl>
         </Card>
-      </div>
+      )}
 
-      <Card>
-        <h2 className="mb-3 text-sm font-semibold text-slate-700">
-          Predicted components ({mo.predicted_component_count}) — click a row to highlight
-        </h2>
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs">
-            <thead className="text-slate-500">
-              <tr>
-                <th className="py-1 pr-3">#</th>
-                <th className="py-1 pr-3">Pixels</th>
-                <th className="py-1 pr-3">bbox [x,y,w,h]</th>
-                <th className="py-1 pr-3">Major axis (px)</th>
-                <th className="py-1 pr-3">Orientation (°)</th>
-              </tr>
-            </thead>
-            <tbody>
-              {mo.predicted_components.slice(0, 50).map((c) => (
-                <tr
-                  key={c.index}
-                  onClick={() => setHighlight(highlight === c.index ? null : c.index)}
-                  className={`cursor-pointer border-t border-slate-100 ${
-                    highlight === c.index ? "bg-yellow-100" : "hover:bg-slate-50"
-                  }`}
-                >
-                  <td className="py-1 pr-3">{c.index}</td>
-                  <td className="py-1 pr-3">{fmt(c.pixel_count)}</td>
-                  <td className="py-1 pr-3">[{c.bbox.join(", ")}]</td>
-                  <td className="py-1 pr-3">{c.major_axis_px != null ? c.major_axis_px.toFixed(1) : "—"}</td>
-                  <td className="py-1 pr-3">{c.orientation_deg != null ? c.orientation_deg.toFixed(1) : "—"}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          {mo.predicted_components.length === 0 && <p className="py-2 text-xs text-slate-500">No predicted components.</p>}
-        </div>
-      </Card>
-
-      <Card>
-        <h2 className="mb-3 text-sm font-semibold text-slate-700">Downloads</h2>
-        <div className="flex flex-wrap gap-2">
-          {([
-            ["overlay.png", "Overlay"],
-            ["mask.png", "Mask"],
-            ["prob.png", "Confidence"],
-            ["input_8bit.png", "Model input"],
-            ["stats.json", "Stats JSON"],
-            ["bundle.zip", "All (.zip)"],
-          ] as const).map(([f, label]) => (
-            <a
-              key={f}
-              href={resultUrl(result_id, f)}
-              download
-              className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-100"
-            >
-              <Download className="h-3.5 w-3.5" />
-              {label}
-            </a>
-          ))}
-        </div>
-      </Card>
+      {tab === "Downloads" && (
+        <Card>
+          <h2 className="mb-3 text-sm font-semibold text-slate-700">Downloads</h2>
+          <div className="flex flex-wrap gap-2">
+            {([
+              ["overlay.png", "Overlay"],
+              ["mask.png", "Mask"],
+              ["prob.png", "Confidence"],
+              ["input_8bit.png", "Model input"],
+              ["stats.json", "Stats JSON"],
+              ["bundle.zip", "All (.zip)"],
+            ] as const).map(([f, label]) => (
+              <a
+                key={f}
+                href={resultUrl(result_id, f)}
+                download
+                className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-100"
+              >
+                <Download className="h-3.5 w-3.5" aria-hidden="true" />
+                {label}
+              </a>
+            ))}
+          </div>
+        </Card>
+      )}
 
       <button
         onClick={onReset}

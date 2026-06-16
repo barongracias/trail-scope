@@ -14,6 +14,14 @@ const HOUGH_RGB = "rgb(0, 200, 255)";
 const HIGHLIGHT_RGB = "rgb(250, 204, 21)";
 
 export type ProbHover = { x: number; y: number; p: number } | null;
+export type ViewState = { scale: number; tx: number; ty: number };
+
+// Confidence colourmap (blue→red), shared by the canvas heatmap and the legend so they
+// match exactly. v in [0,1].
+export function confidenceColor(v: number): string {
+  const [r, g, b] = hslToRgb((1 - Math.min(1, Math.max(0, v))) * 240, 0.9, 0.5);
+  return `rgb(${r}, ${g}, ${b})`;
+}
 
 function hslToRgb(h: number, s: number, l: number): [number, number, number] {
   const c = (1 - Math.abs(2 * l - 1)) * s;
@@ -93,6 +101,8 @@ export default function CanvasCompare({
   opacity,
   highlight,
   onProbHover,
+  view: controlledView,
+  onViewChange,
 }: {
   inputUrl: string;
   maskUrl: string;
@@ -104,13 +114,21 @@ export default function CanvasCompare({
   opacity: number;
   highlight: number | null;
   onProbHover?: (h: ProbHover) => void;
+  view?: ViewState;
+  onViewChange?: (v: ViewState) => void;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [base, setBase] = useState<ImageBitmap | null>(null);
   const [maskTint, setMaskTint] = useState<HTMLCanvasElement | null>(null);
   const [prob, setProb] = useState<ReturnType<typeof colourmapProb> | null>(null);
   const [err, setErr] = useState<string | null>(null);
-  const [view, setView] = useState({ scale: 1, tx: 0, ty: 0 });
+  // View is controllable (for synchronised split-view); falls back to internal state.
+  const [internalView, setInternalView] = useState<ViewState>({ scale: 1, tx: 0, ty: 0 });
+  const view = controlledView ?? internalView;
+  const setView = (u: ViewState | ((v: ViewState) => ViewState)) => {
+    const next = typeof u === "function" ? (u as (v: ViewState) => ViewState)(view) : u;
+    (onViewChange ?? setInternalView)(next);
+  };
   const drag = useRef<{ x: number; y: number; tx: number; ty: number } | null>(null);
 
   useEffect(() => {
@@ -208,7 +226,12 @@ export default function CanvasCompare({
     onProbHover({ x: px.x, y: px.y, p: g / 255 });
   };
 
-  const onWheel = (e: React.WheelEvent) => {
+  // Wheel-zoom via a non-passive native listener (React's onWheel is passive, so
+  // preventDefault() there is ignored and warns). A ref holds the latest closure so the
+  // listener is attached once but always reads current state.
+  const containerRef = useRef<HTMLDivElement>(null);
+  const wheelHandler = useRef<(e: WheelEvent) => void>(() => {});
+  wheelHandler.current = (e: WheelEvent) => {
     e.preventDefault();
     const factor = e.deltaY < 0 ? 1.15 : 1 / 1.15;
     setView((v) => {
@@ -220,13 +243,20 @@ export default function CanvasCompare({
       return { scale, tx: v.tx - cx * (k - 1), ty: v.ty - cy * (k - 1) };
     });
   };
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const h = (e: WheelEvent) => wheelHandler.current(e);
+    el.addEventListener("wheel", h, { passive: false });
+    return () => el.removeEventListener("wheel", h);
+  }, []);
 
   if (err) return <div className="text-sm text-red-600">Overlay error: {err}</div>;
 
   return (
     <div
+      ref={containerRef}
       className="relative overflow-hidden rounded-lg border border-slate-300 bg-black"
-      onWheel={onWheel}
       onMouseLeave={() => {
         drag.current = null;
         onProbHover?.(null);

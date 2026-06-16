@@ -458,6 +458,23 @@ async def job_status(job_id: str) -> JobStatus:
     return JobStatus(**status)
 
 
+@app.delete("/jobs/{job_id}")
+async def cancel_job(job_id: str) -> dict:
+    """Cancel a running job. Already-finished jobs return their terminal state unchanged."""
+    if not _RESULT_ID_RE.match(job_id):
+        raise error_response(404, "Unknown job id")
+    job_manager = getattr(app.state, "job_manager", None)
+    if job_manager is None:
+        raise error_response(503, "Model unavailable.")
+    if job_manager.cancel(job_id):
+        log_event("job.cancelled", job_id=job_id)
+        return {"job_id": job_id, "state": "cancelled"}
+    status = job_manager.get_status(job_id)
+    if status is None:
+        raise error_response(404, "Job not found")
+    return {"job_id": job_id, "state": status.get("state")}
+
+
 @app.get("/results/{result_id}/{filename}")
 async def get_result(result_id: str, filename: str):
     """Serve a per-result artifact (or a .zip bundle of all of them). Results live in a

@@ -27,6 +27,8 @@ export type PredictedComponent = {
   bbox: number[];
   major_axis_px: number | null;
   orientation_deg: number | null;
+  mean_probability: number;
+  max_probability: number;
 };
 
 export type ResultFile =
@@ -165,7 +167,8 @@ export type JobState =
   | "inferring"
   | "rendering"
   | "done"
-  | "error";
+  | "error"
+  | "cancelled";
 
 export type JobStatus = {
   job_id: string;
@@ -202,4 +205,12 @@ export async function getJobStatus(
 ): Promise<JobStatus> {
   const res = await fetch(`${baseUrl}/jobs/${jobId}/status`, { cache: "no-store" });
   return handle<JobStatus>(res);
+}
+
+export async function cancelJob(
+  jobId: string,
+  baseUrl: string = API_BASE_URL,
+): Promise<{ job_id: string; state: string }> {
+  const res = await fetch(`${baseUrl}/jobs/${jobId}`, { method: "DELETE" });
+  return handle<{ job_id: string; state: string }>(res);
 }

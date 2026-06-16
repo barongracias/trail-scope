@@ -207,3 +207,27 @@ and locked invariants intact (the async ceiling and confidence map are not tunin
   flow reaches the full-frame output; zero console errors. TorchScript backend active.
 - **All roadmap items now complete** (v1.1–v1.4). Remaining future ideas are only the
   explicitly out-of-scope ones (threshold slider, benchmarking, etc. — never to build).
+
+### 2026-06-16 — v1.5 interpretability + UX (built + browser-verified)
+Seven additive items (roadmap v1.5: 1,2,3,7,8,9,10); guardrails intact.
+- **#3 per-component confidence**: `_component_stats` now samples the prob canvas →
+  `mean_probability`/`max_probability` per component (schema + table columns), with an
+  honest caption ("not a likelihood that a real object is present"). +tests.
+- **#7 cancel job**: `JobManager.cancel` + `DELETE /jobs/{id}` + new terminal `cancelled`
+  state (CancelledError handled; in-flight threadpool work finishes in background, result
+  dropped). Frontend Cancel button in the large-mode processing view. +tests.
+- **#1 confidence colourbar**: `ConfidenceLegend` shares the exact canvas colourmap;
+  shown when "Model confidence" is on.
+- **#2 About panel**: collapsible method/tiers/thesis-link explainer on the input page.
+- **#9 tabbed output + synced split-view**: Overview/Components/Provenance/Downloads tabs;
+  model-input and overlay are both `CanvasCompare` sharing a lifted `view` → zoom/pan in
+  sync (verified: identical transforms). Wheel-zoom moved to a non-passive native listener
+  (kills the passive-preventDefault console warning).
+- **#8 a11y**: tab roles/aria-selected, slider + icon-button aria-labels, keyboard-operable
+  dropzone and component rows, focus outlines, `role=status` processing announcer.
+- **#10 demo gallery**: 3 small DECam crops (NAVSTAR-70, STARLINK-2600, DELTA-2; ~564 KB
+  total) located by the predicted-mask bbox; picker lists all three.
+- **Verified**: backend 52 tests + ruff clean; frontend lint + 5 tests + build clean; live
+  browser run of every feature (tabs, legend, synced zoom, per-component conf., cancel,
+  gallery) with **zero console errors**. Deferred: #4 shape descriptors, #5 arcsec units,
+  #6 confidence histogram.

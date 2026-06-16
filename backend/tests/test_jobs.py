@@ -101,6 +101,43 @@ def test_job_status_404_for_unknown_id(client):
     assert client.get("/jobs/not-hex/status").status_code == 404
 
 
+def test_done_job_reports_per_component_confidence(client):
+    arr = (np.random.default_rng(30).random((300, 300)) * 255).astype(np.uint8)
+    job_id = client.post("/jobs", files={"file": ("p.png", _png_bytes(arr), "image/png")}).json()[
+        "job_id"
+    ]
+    st = _poll(client, job_id)
+    assert st["state"] == "done"
+    for comp in st["stats"]["model_output"]["predicted_components"]:
+        assert 0.0 <= comp["mean_probability"] <= 1.0
+        assert comp["max_probability"] >= comp["mean_probability"]
+
+
+def test_cancel_running_job(client, monkeypatch):
+    # Make the job slow enough to cancel: large budget + big-ish image.
+    monkeypatch.setattr(config, "MAX_PATCH_BUDGET", 1)
+    P = config.PATCH_SIZE
+    side = int(P * 2.1)  # 9 patches → a few seconds of inference
+    payload = _png_bytes((np.random.default_rng(31).random((side, side)) * 255).astype(np.uint8))
+    job_id = client.post("/jobs", files={"file": ("c.png", payload, "image/png")}).json()["job_id"]
+    # Cancel promptly.
+    time.sleep(0.2)
+    resp = client.delete(f"/jobs/{job_id}")
+    assert resp.status_code == 200
+    assert resp.json()["state"] == "cancelled"
+    # Status settles to cancelled (the in-flight stage may finish first).
+    deadline = time.time() + 30
+    while time.time() < deadline:
+        if client.get(f"/jobs/{job_id}/status").json()["state"] == "cancelled":
+            break
+        time.sleep(0.1)
+    assert client.get(f"/jobs/{job_id}/status").json()["state"] == "cancelled"
+
+
+def test_cancel_unknown_job_404(client):
+    assert client.delete("/jobs/" + "f" * 32).status_code == 404
+
+
 def test_ttl_sweep_spares_in_flight_job_dir(client, monkeypatch):
     # An aged dir with a non-terminal status.json must NOT be swept (M1), while a 'done'
     # one of the same age must be.
