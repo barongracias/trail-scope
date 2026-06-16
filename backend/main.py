@@ -225,14 +225,33 @@ def _cache_put(key: str, result_id: str) -> None:
         _RESULT_CACHE.popitem(last=False)
 
 
+_NON_TERMINAL_JOB_STATES = {"queued", "preprocessing", "inferring", "rendering"}
+
+
+def _dir_has_active_job(d: Path) -> bool:
+    """True if the dir holds an async job whose status is non-terminal (still running).
+
+    Guards against the TTL sweep deleting an in-flight job dir even when an operator sets
+    RESULTS_TTL_SECONDS below a job's runtime (M1).
+    """
+    status_file = d / "status.json"
+    if not status_file.exists():
+        return False
+    try:
+        return json.loads(status_file.read_text()).get("state") in _NON_TERMINAL_JOB_STATES
+    except (OSError, json.JSONDecodeError):  # pragma: no cover - defensive
+        return False
+
+
 def _cleanup_old_results() -> None:
-    """Remove per-result dirs older than RESULTS_TTL_SECONDS (best-effort)."""
+    """Remove per-result dirs older than RESULTS_TTL_SECONDS (best-effort), but never an
+    in-flight async job's dir."""
     if not config.RESULTS_DIR.exists():
         return
     cutoff = time.time() - config.RESULTS_TTL_SECONDS
     for d in config.RESULTS_DIR.iterdir():
         try:
-            if d.is_dir() and d.stat().st_mtime < cutoff:
+            if d.is_dir() and d.stat().st_mtime < cutoff and not _dir_has_active_job(d):
                 shutil.rmtree(d, ignore_errors=True)
         except OSError:  # pragma: no cover - defensive
             pass
@@ -410,10 +429,12 @@ async def create_job(
         raise error_response(503, "Model unavailable: checkpoint failed the integrity gate.")
 
     _cleanup_old_results()
-    if job_manager.active_count() >= config.MAX_PENDING_JOBS:
-        raise error_response(429, "Too many queued jobs. Retry shortly.")
-
     stored_path, job_id, original, _digest = await _store_upload(file)
+    # Check the cap immediately before submit (no await between → atomic under asyncio),
+    # so a burst of concurrent submits can't all slip past it (M2).
+    if job_manager.active_count() >= config.MAX_PENDING_JOBS:
+        stored_path.unlink(missing_ok=True)
+        raise error_response(429, "Too many queued jobs. Retry shortly.")
     job_manager.submit(
         job_id,
         stored_path,

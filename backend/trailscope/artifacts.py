@@ -111,8 +111,9 @@ def run_inference(
 ) -> dict[str, Any]:
     """Execute inference + rendering for one image, writing artifacts into `out_dir`.
 
-    `on_stage(name)` (optional) is called with "inferring" then "rendering" so the async
-    jobs path can report coarse progress. Returns the stats dict.
+    `on_stage("rendering")` (optional) is called after inference, before artifacts are
+    written, so the async jobs path can report the render phase. (The "inferring"
+    transition is owned by the caller, which knows the patch count.) Returns the stats dict.
     """
     import torch
 
@@ -120,8 +121,6 @@ def run_inference(
     out_dir.mkdir(parents=True, exist_ok=True)
     image_u8 = pre.image_u8
 
-    if on_stage:
-        on_stage("inferring")
     t0 = time.perf_counter()
     # inference_mode is a touch faster than the vendored function's inner no_grad and
     # nests harmlessly; we wrap the call site rather than edit the frozen vendored core.

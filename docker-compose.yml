@@ -9,6 +9,10 @@ services:
     environment:
       - PYTHONUNBUFFERED=1
       - ALLOWED_ORIGINS=http://localhost:3000
+    # A full-budget async job (MAX_JOB_PATCH_BUDGET=256 patches) peaks at ~1 GB RSS on CPU.
+    # Cap it so a large job can't starve the host; lower TRAILSCOPE_MAX_JOB_PATCH_BUDGET on
+    # smaller machines.
+    mem_limit: 2g
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s

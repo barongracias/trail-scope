@@ -101,6 +101,32 @@ def test_job_status_404_for_unknown_id(client):
     assert client.get("/jobs/not-hex/status").status_code == 404
 
 
+def test_ttl_sweep_spares_in_flight_job_dir(client, monkeypatch):
+    # An aged dir with a non-terminal status.json must NOT be swept (M1), while a 'done'
+    # one of the same age must be.
+    import json as _json
+    import os as _os
+    import time as _time
+
+    monkeypatch.setattr(config, "RESULTS_TTL_SECONDS", 0)
+    config.RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+    old = _time.time() - 10
+
+    active = config.RESULTS_DIR / ("b" * 32)
+    active.mkdir(exist_ok=True)
+    (active / "status.json").write_text(_json.dumps({"state": "inferring"}))
+    _os.utime(active, (old, old))
+
+    done = config.RESULTS_DIR / ("c" * 32)
+    done.mkdir(exist_ok=True)
+    (done / "status.json").write_text(_json.dumps({"state": "done"}))
+    _os.utime(done, (old, old))
+
+    main._cleanup_old_results()
+    assert active.exists(), "in-flight job dir must survive the TTL sweep"
+    assert not done.exists(), "completed job dir past TTL should be swept"
+
+
 def test_jobs_503_when_model_unavailable(tmp_path, monkeypatch):
     bad = tmp_path / "model-best.pth"
     bad.write_bytes(b"corrupt")

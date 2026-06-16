@@ -83,9 +83,12 @@ pip install -r backend/requirements.lock
   else 413). Returns `{result_id, stats}`.
 - `POST /inspect` — multipart `file`; lists a FITS file's HDUs for the HDU picker.
 - `POST /jobs` + `GET /jobs/{id}/status` — **opt-in async path** for large/full-frame
-  images (over 64 patches, up to a hard `MAX_JOB_PATCH_BUDGET` ceiling). `/jobs` returns
-  `{job_id}` immediately; poll the status file (`queued → preprocessing → inferring →
-  rendering → done | error`). The model, threshold, and recipe are identical to `/infer`.
+  images (over 64 patches, up to a hard `MAX_JOB_PATCH_BUDGET` ceiling, default 256).
+  `/jobs` returns `{job_id}` immediately; poll the status file (`queued → preprocessing →
+  inferring → rendering → done | error`). The model, threshold, and recipe are identical to
+  `/infer`. **Memory:** a full-budget (256-patch) job peaks at **~1 GB RSS** on CPU
+  (compose caps the backend at 2 GB) — lower `TRAILSCOPE_MAX_JOB_PATCH_BUDGET` on small
+  hosts.
 - `GET /results/{id}/{input_8bit.png | overlay.png | mask.png | prob.png |
   original_preview.png | stats.json | bundle.zip}` — per-result artifacts (cleared on
   startup, swept by TTL). `prob.png` is a qualitative confidence map; `original_preview.png`

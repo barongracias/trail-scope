@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 from pathlib import Path
 from typing import Any
 
@@ -53,6 +54,9 @@ class JobManager:
             d = config.RESULTS_DIR / job_id
             d.mkdir(parents=True, exist_ok=True)
             (d / "status.json").write_text(json.dumps(st) + "\n")
+            # Bump the DIR mtime (overwriting status.json does not) so the TTL sweep
+            # keeps an active job's dir fresh; TTL then counts from the last write.
+            os.utime(d, None)
         except OSError:  # pragma: no cover - defensive
             pass
         return st
