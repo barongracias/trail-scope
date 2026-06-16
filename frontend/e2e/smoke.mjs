@@ -70,11 +70,11 @@ try {
   });
   if (colored <= 0) fail("overlay canvas has no coloured overlay pixels");
 
-  // Downloads tab holds the .zip bundle link.
-  await page.locator("[role=tab]:has-text('Downloads')").click();
+  // Downloads is a collapsed <details>; open it and check the .zip bundle link.
+  await page.locator("summary:has-text('Downloads')").click();
   await page.waitForTimeout(300);
   if (!(await page.locator("a:has-text('All (.zip)')").count())) {
-    fail("missing zip bundle link in Downloads tab");
+    fail("missing zip bundle link in Downloads section");
   }
 
   if (errors.length) fail("console errors: " + JSON.stringify(errors));

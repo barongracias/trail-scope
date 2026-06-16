@@ -238,7 +238,7 @@ export default function CanvasCompare({
   const wheelHandler = useRef<(e: WheelEvent) => void>(() => {});
   wheelHandler.current = (e: WheelEvent) => {
     e.preventDefault();
-    const factor = e.deltaY < 0 ? 1.15 : 1 / 1.15;
+    const factor = e.deltaY < 0 ? 1.06 : 1 / 1.06;
     setView((v) => {
       const scale = Math.min(8, Math.max(1, v.scale * factor));
       const rect = canvasRef.current!.getBoundingClientRect();

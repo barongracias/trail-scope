@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { AlertTriangle, Copy, Download, Loader2, Upload } from "lucide-react";
+import { AlertTriangle, ArrowLeft, Copy, Download, Loader2, Upload } from "lucide-react";
 import {
   ApiError,
   type FitsHdu,
@@ -20,8 +20,7 @@ import ConfidenceLegend from "./ConfidenceLegend";
 import AboutPanel from "./AboutPanel";
 import CropView from "./CropView";
 
-const SCOPE =
-  "A qualitative, single-image inference demo of the locked thesis detector. Not a benchmark, not a validated cross-domain tool, no training, no tunable thresholds. Qualitative inference only; no performance claims are made for uploaded images.";
+const SCOPE = "A qualitative, single-image inference demo of the locked thesis detector.";
 
 const DISCLAIMER =
   "This is not a validated detector for this input unless it is from the original MeerLICHT-style domain.";
@@ -29,20 +28,31 @@ const DISCLAIMER =
 const ACCEPTED = ".fits, .fit, .fits.fz, .png, .jpg, .jpeg, .tif";
 
 const TIER_TEXT: Record<Tier, string> = {
-  in_domain_like: "In-domain-like input — an 8-bit display image at a plausible scale.",
+  in_domain_like: "In-domain-like input – an 8-bit display image at a plausible scale.",
   recipe_matched:
-    "Recipe-matched input — FITS with a header-resolved pixel scale (the validated DECam-style recipe).",
-  best_effort: "Best-effort input — outside the validated recipe (e.g. unknown pixel scale).",
+    "Recipe-matched input – FITS with a header-resolved pixel scale (the validated DECam-style recipe).",
+  best_effort: "Best-effort input – outside the validated recipe (e.g. unknown pixel scale).",
 };
 const TIER_DEFS =
-  "in_domain_like: 8-bit display image at a plausible scale.\nrecipe_matched: FITS with a header-resolved pixel scale (the validated DECam recipe).\nbest_effort: everything else (e.g. unknown pixel scale — the model is not scale-invariant).";
+  "in_domain_like: 8-bit display image at a plausible scale.\nrecipe_matched: FITS with a header-resolved pixel scale (the validated DECam recipe).\nbest_effort: everything else (e.g. unknown pixel scale – the model is not scale-invariant).";
 
+// Examples: text-only chips, image shown on hover. DECam = public NOIRLab; MeerLICHT
+// examples are reproduced from the public thesis figures (with acknowledgement).
 const DEMOS = [
-  { label: "NAVSTAR-70", file: "decam_navstar70_crop.png", note: "satellite streak" },
-  { label: "STARLINK-2600", file: "decam_starlink2600_crop.png", note: "satellite streak" },
-  { label: "DELTA-2 R/B", file: "decam_delta2_crop.png", note: "rocket-body streak" },
-  { label: "Star field", file: "decam_starfield_crop.png", note: "bright stars · no streak" },
+  { label: "NAVSTAR-70", file: "decam_navstar70_crop.png" },
+  { label: "STARLINK-2600", file: "decam_starlink2600_crop.png" },
+  { label: "DELTA-2 R/B", file: "decam_delta2_crop.png" },
+  { label: "Star field", file: "decam_starfield_crop.png" },
+  { label: "Hough gap (Fig 5.4)", file: "meerlicht_hough_gap_crop.png" },
 ];
+
+const TOGGLE_TIPS = {
+  mask: "Pixels the U-Net scored at or above the locked 0.45 threshold (pink).",
+  hough:
+    "Optional probabilistic Hough line-fit over a lower-threshold canvas (cyan); can bridge short gaps the U-Net leaves.",
+  prob: "Per-pixel model probability as a blue→red heatmap. Qualitative; not a tunable threshold.",
+  compare: "Show the predicted mask with the Hough overlay off vs on, side by side.",
+};
 
 type Phase = "input" | "processing" | "output";
 
@@ -70,7 +80,6 @@ export default function Page() {
   const [jobId, setJobId] = useState<string | null>(null);
   const cancelledRef = useRef(false);
 
-  // Output overlay controls.
   const [showMask, setShowMask] = useState(true);
   const [showHough, setShowHough] = useState(true);
   const [showProb, setShowProb] = useState(false);
@@ -87,7 +96,6 @@ export default function Page() {
     healthCheck().then((h) => setBackendDown(!h.model_sha_ok)).catch(() => setBackendDown(true));
   }, []);
 
-  // Paste-from-clipboard upload.
   useEffect(() => {
     const onPaste = (e: ClipboardEvent) => {
       const f = e.clipboardData?.files?.[0];
@@ -105,19 +113,22 @@ export default function Page() {
     setHduList(null);
     setHduIndex("");
     if (f && isFits(f)) {
-      inspectFits(f)
-        .then((r) => setHduList(r.hdus))
-        .catch(() => setHduList(null));
+      inspectFits(f).then((r) => setHduList(r.hdus)).catch(() => setHduList(null));
     }
   };
 
-  const pickDemo = async (demoFile: string, label: string) => {
+  // Click an example to select; click the selected one again to unselect.
+  const pickDemo = async (demoFile: string) => {
+    if (file?.name === demoFile) {
+      chooseFile(null);
+      return;
+    }
     try {
       const res = await fetch(`/demo/${demoFile}`);
       if (!res.ok) throw new Error("Demo asset not found");
       chooseFile(new File([await res.blob()], demoFile, { type: "image/png" }));
     } catch {
-      setError(`Could not load demo "${label}".`);
+      setError("Could not load that example.");
     }
   };
 
@@ -146,13 +157,12 @@ export default function Page() {
     };
 
     if (largeMode) {
-      // Async path: submit a job and poll its status (full-frame, > 64 patches).
       cancelledRef.current = false;
       try {
         const { job_id } = await createJob(runFile, opts);
         setJobId(job_id);
         for (let i = 0; i < 1200; i++) {
-          if (cancelledRef.current) return; // user cancelled; UI already reset
+          if (cancelledRef.current) return;
           const st = await getJobStatus(job_id);
           setStage(st.n_patches ? `${st.detail} · ${st.n_patches} patches` : st.detail);
           if (st.state === "done" && st.result_id && st.stats) {
@@ -163,11 +173,8 @@ export default function Page() {
           }
           if (st.state === "error" || st.state === "cancelled") {
             setJobId(null);
-            if (st.state === "cancelled") {
-              setPhase("input");
-            } else {
-              handleFailure(new ApiError(st.error ?? "Job failed", st.status_code ?? undefined), runFile);
-            }
+            if (st.state === "cancelled") setPhase("input");
+            else handleFailure(new ApiError(st.error ?? "Job failed", st.status_code ?? undefined), runFile);
             return;
           }
           await new Promise((r) => setTimeout(r, 700));
@@ -179,7 +186,6 @@ export default function Page() {
       return;
     }
 
-    // Synchronous path (default, ≤ 64 patches).
     stageTimers.current.forEach(clearTimeout);
     stageTimers.current = [
       window.setTimeout(() => setStage("Running locked U-Net"), 600),
@@ -219,11 +225,26 @@ export default function Page() {
 
   return (
     <main className="min-h-screen max-w-5xl mx-auto px-4 py-8 text-slate-800">
-      {/* Title/subtitle on input + processing only; the output page leads with the images. */}
       {phase !== "output" && (
-        <header className="mb-6">
-          <h1 className="text-2xl font-bold text-slate-900">trail-scope</h1>
-          <p className="mt-1 text-sm text-slate-600 max-w-3xl">{SCOPE}</p>
+        <header className="mb-6 flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h1 className="text-3xl font-extrabold tracking-tight">
+              <span className="bg-gradient-to-r from-blue-600 via-indigo-600 to-violet-600 bg-clip-text text-transparent">
+                trail-scope
+              </span>{" "}
+              <span aria-hidden="true">🛰️</span>
+            </h1>
+            <p className="mt-1 max-w-2xl text-sm text-slate-600">{SCOPE}</p>
+          </div>
+          {phase === "input" && (
+            <button
+              onClick={() => file && run(file)}
+              disabled={!file}
+              className="rounded-lg bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-slate-300"
+            >
+              Run inference
+            </button>
+          )}
         </header>
       )}
 
@@ -254,7 +275,6 @@ export default function Page() {
           reject413={reject413}
           cropping={cropping}
           setCropping={setCropping}
-          onRun={() => file && run(file)}
           onCropped={(f) => {
             setFile(f);
             run(f);
@@ -264,11 +284,7 @@ export default function Page() {
       )}
 
       {phase === "processing" && (
-        <ProcessingView
-          filename={file?.name ?? ""}
-          stage={stage}
-          onCancel={largeMode ? cancelRun : undefined}
-        />
+        <ProcessingView filename={file?.name ?? ""} stage={stage} onCancel={largeMode ? cancelRun : undefined} />
       )}
 
       {phase === "output" && result && (
@@ -290,19 +306,18 @@ export default function Page() {
           setCompareHough={setCompareHough}
           copied={copied}
           setCopied={setCopied}
+          onBack={() => setPhase("input")}
           onReset={reset}
         />
       )}
 
-      {/* Full data/honesty note on the inference page only (the input page keeps a slim
-          disclaimer + NOIRLab credit by the demos to satisfy the honesty guardrail). */}
       {phase === "output" && (
         <footer className="mt-10 border-t border-slate-200/60 pt-4 text-xs text-slate-500">
           <p className="font-medium text-slate-600">{DISCLAIMER}</p>
           <p className="mt-1">
-            Demo data: public DECam frames. Based on observations at Cerro Tololo Inter-American
-            Observatory, NSF&apos;s NOIRLab. No MeerLICHT imagery is distributed. Stats use
-            &quot;predicted mask/component&quot; language and make no accuracy claims.
+            Demo data: public DECam frames (NSF&apos;s NOIRLab) and MeerLICHT examples reproduced
+            from the thesis with the consortium&apos;s acknowledgement. Stats use &quot;predicted
+            mask/component&quot; language and make no accuracy claims.
           </p>
         </footer>
       )}
@@ -312,6 +327,23 @@ export default function Page() {
 
 function Card({ children, className = "" }: { children: React.ReactNode; className?: string }) {
   return <section className={`glass rounded-2xl p-5 ${className}`}>{children}</section>;
+}
+
+function InfoTip({ text }: { text: string }) {
+  return (
+    <span className="group/tip relative inline-flex">
+      <span
+        className="ml-1 inline-flex h-4 w-4 cursor-help items-center justify-center rounded-full border border-slate-400 text-[10px] font-medium text-slate-500"
+        aria-label={text}
+        role="img"
+      >
+        ?
+      </span>
+      <span className="pointer-events-none absolute bottom-full left-1/2 z-30 mb-1.5 hidden w-52 -translate-x-1/2 rounded-lg bg-slate-800 px-2.5 py-1.5 text-[11px] leading-snug text-white shadow-lg group-hover/tip:block">
+        {text}
+      </span>
+    </span>
+  );
 }
 
 function InputView(props: {
@@ -333,14 +365,13 @@ function InputView(props: {
   reject413: string | null;
   cropping: boolean;
   setCropping: (b: boolean) => void;
-  onRun: () => void;
   onCropped: (f: File) => void;
-  pickDemo: (f: string, label: string) => void;
+  pickDemo: (f: string) => void;
 }) {
   const {
     file, chooseFile, hough, setHough, largeMode, setLargeMode, pixelScale, setPixelScale,
     hduIndex, setHduIndex, hduList, dragging, setDragging, fileInputRef, error, reject413,
-    cropping, setCropping, onRun, onCropped, pickDemo,
+    cropping, setCropping, onCropped, pickDemo,
   } = props;
 
   if (cropping && file) {
@@ -397,32 +428,21 @@ function InputView(props: {
         </div>
 
         <div className="mt-4">
-          <p className="mb-2 text-xs font-medium text-slate-500">
-            Or try a public DECam demo (click a thumbnail to preview &amp; run):
-          </p>
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <p className="mb-2 text-xs font-medium text-slate-500">Or try an example (hover to preview):</p>
+          <div className="flex flex-wrap gap-2">
             {DEMOS.map((d) => (
-              <div key={d.file} className="group relative">
+              <div key={d.file} className="group/demo relative">
                 <button
-                  onClick={() => pickDemo(d.file, d.label)}
-                  aria-label={`Run demo: ${d.label} (${d.note})`}
-                  className={`w-full overflow-hidden rounded-lg border bg-white/40 text-left transition hover:ring-2 hover:ring-blue-300 ${
-                    file?.name === d.file ? "border-blue-400 ring-2 ring-blue-300" : "border-white/60"
+                  onClick={() => pickDemo(d.file)}
+                  className={`rounded-full border px-3 py-1 text-xs transition ${
+                    file?.name === d.file
+                      ? "border-blue-400 bg-blue-50 text-blue-700"
+                      : "border-slate-300 text-slate-700 hover:bg-slate-100"
                   }`}
                 >
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={`/demo/${d.file}`}
-                    alt={`${d.label} — ${d.note}`}
-                    className="h-24 w-full object-cover"
-                  />
-                  <div className="px-2 py-1.5">
-                    <p className="text-xs font-medium text-slate-700">{d.label}</p>
-                    <p className="text-[10px] text-slate-500">{d.note}</p>
-                  </div>
+                  {d.label}
                 </button>
-                {/* Enlarged preview on hover/focus. */}
-                <div className="pointer-events-none absolute bottom-full left-1/2 z-20 mb-2 hidden w-64 -translate-x-1/2 group-hover:block group-focus-within:block">
+                <div className="pointer-events-none absolute bottom-full left-1/2 z-20 mb-2 hidden w-56 -translate-x-1/2 group-hover/demo:block">
                   <div className="glass rounded-xl p-1.5 shadow-xl">
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img
@@ -430,23 +450,21 @@ function InputView(props: {
                       alt={`${d.label} preview`}
                       className="w-full rounded-lg border border-white/60 bg-black"
                     />
-                    <p className="px-1 pt-1 text-[11px] font-medium text-slate-700">
-                      {d.label} · <span className="text-slate-500">{d.note}</span>
-                    </p>
                   </div>
                 </div>
               </div>
             ))}
           </div>
           <p className="mt-2 text-[10px] text-slate-400">
-            Public DECam frames — NSF&apos;s NOIRLab. No MeerLICHT imagery is distributed.
+            DECam: public NSF&apos;s NOIRLab frames. MeerLICHT examples reproduced from the thesis
+            with thanks to the MeerLICHT consortium; no raw collaboration data is redistributed.
           </p>
         </div>
       </Card>
 
       <details className="glass rounded-2xl p-5">
         <summary className="cursor-pointer text-sm font-semibold text-slate-700">
-          Options — pixel scale, FITS HDU, Hough, large images
+          Options – pixel scale, FITS HDU, Hough, large images
         </summary>
         <div className="mt-4 grid gap-4 sm:grid-cols-3">
           <label className="flex flex-col gap-1 text-xs text-slate-600">
@@ -503,8 +521,8 @@ function InputView(props: {
             className="mt-0.5 h-4 w-4"
           />
           <span>
-            Process large images (over 64 patches) as a background job. Slower on CPU and
-            still qualitative — the model, threshold, and recipe are unchanged.
+            Process large images (over 64 patches) as a background job. Slower on CPU and still
+            qualitative; the model, threshold, and recipe are unchanged.
           </span>
         </label>
       </details>
@@ -519,19 +537,6 @@ function InputView(props: {
       {error && (
         <div className="rounded-lg border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>
       )}
-
-      <div className="flex items-center justify-between gap-3">
-        <p className="text-xs text-slate-500">
-          The model and threshold are fixed; this run does not tune parameters or estimate accuracy.
-        </p>
-        <button
-          onClick={onRun}
-          disabled={!file}
-          className="rounded-lg bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-slate-300"
-        >
-          Run inference
-        </button>
-      </div>
 
       <p className="text-center text-xs text-slate-500">{DISCLAIMER}</p>
     </div>
@@ -592,23 +597,20 @@ function OutputView(props: {
   setCompareHough: (b: boolean) => void;
   copied: boolean;
   setCopied: (b: boolean) => void;
+  onBack: () => void;
   onReset: () => void;
 }) {
   const {
     result, showMask, setShowMask, showHough, setShowHough, showProb, setShowProb,
     opacity, setOpacity, highlight, setHighlight, probHover, setProbHover,
-    compareHough, setCompareHough, copied, setCopied, onReset,
+    compareHough, setCompareHough, copied, setCopied, onBack, onReset,
   } = props;
   const { result_id, stats } = result;
   const mo = stats.model_output;
   const hasOriginal = stats.artifacts.includes("original_preview.png");
-
-  const TABS = ["Provenance", "Downloads"] as const;
-  const [tab, setTab] = useState<(typeof TABS)[number]>("Provenance");
-  // Shared zoom/pan for the synchronised split-view (model input ↔ overlay).
   const [view, setView] = useState<ViewState>({ scale: 1, tx: 0, ty: 0 });
 
-  // Confidence is mutually exclusive with mask/Hough — you can't read the heatmap under them.
+  // Confidence is mutually exclusive with mask/Hough.
   const selectMask = (v: boolean) => {
     setShowMask(v);
     if (v) setShowProb(false);
@@ -638,27 +640,40 @@ function OutputView(props: {
 
   return (
     <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <button
+          onClick={onBack}
+          className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100"
+        >
+          <ArrowLeft className="h-4 w-4" aria-hidden="true" />
+          Back
+        </button>
+        <button
+          onClick={onReset}
+          className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-blue-700"
+        >
+          Run another image
+        </button>
+      </div>
+
       {/* IMAGES — the focus of the page. */}
       <Card>
-        <div className="mb-3 flex flex-wrap items-center gap-4">
-          <Toggle color="rgb(255,47,146)" label="Predicted mask" checked={showMask} onChange={selectMask} />
+        <div className="mb-3 flex flex-wrap items-center gap-x-4 gap-y-2">
+          <Toggle color="rgb(255,47,146)" label="Predicted mask" tip={TOGGLE_TIPS.mask} checked={showMask} onChange={selectMask} />
           <Toggle
             color="rgb(0,200,255)"
             label={`Hough overlay${stats.hough.enabled ? "" : " (off)"}`}
+            tip={TOGGLE_TIPS.hough}
             checked={showHough}
             onChange={selectHough}
             disabled={!stats.hough.enabled}
           />
-          <Toggle color="linear-gradient(90deg,#2563eb,#ef4444)" label="Model confidence (qualitative)" checked={showProb} onChange={selectProb} />
+          <Toggle color="linear-gradient(90deg,#2563eb,#ef4444)" label="Model confidence" tip={TOGGLE_TIPS.prob} checked={showProb} onChange={selectProb} />
           {showProb && <ConfidenceLegend />}
-          <label className="flex items-center gap-2 text-xs text-slate-600">
-            <input
-              type="checkbox"
-              checked={compareHough}
-              disabled={showProb}
-              onChange={(e) => setCompareHough(e.target.checked)}
-            />
+          <label className="flex items-center gap-1 text-xs text-slate-600">
+            <input type="checkbox" checked={compareHough} disabled={showProb} onChange={(e) => setCompareHough(e.target.checked)} />
             Compare Hough off/on
+            <InfoTip text={TOGGLE_TIPS.compare} />
           </label>
           <label className="ml-auto flex items-center gap-2 text-xs text-slate-600">
             Overlay opacity
@@ -699,7 +714,7 @@ function OutputView(props: {
               </figure>
             )}
             <figure>
-              <figcaption className="mb-1 text-xs text-slate-500">Model input (zoom/pan synced)</figcaption>
+              <figcaption className="mb-1 text-xs text-slate-500">Model input</figcaption>
               <CanvasCompare {...canvasProps} showMask={false} showHough={false} showProb={false} />
             </figure>
             <figure>
@@ -711,45 +726,17 @@ function OutputView(props: {
                   </span>
                 )}
               </figcaption>
-              <CanvasCompare
-                {...canvasProps}
-                showMask={showMask}
-                showHough={showHough}
-                showProb={showProb}
-                onProbHover={setProbHover}
-              />
+              <CanvasCompare {...canvasProps} showMask={showMask} showHough={showHough} showProb={showProb} onProbHover={setProbHover} />
             </figure>
           </div>
         )}
-      </Card>
 
-      {/* TIER — below the images (informational, neutral). */}
-      <div className="glass rounded-2xl px-5 py-4">
-        <p className="text-xs font-semibold uppercase tracking-wide text-blue-700">
-          Tier: {stats.tier.replace(/_/g, " ")}{" "}
-          <span className="cursor-help text-blue-400" title={TIER_DEFS}>
-            (what&apos;s this?)
-          </span>
-        </p>
-        <p className="mt-1 text-sm text-slate-700">{TIER_TEXT[stats.tier]}</p>
-        <p className="mt-1 text-sm font-medium text-slate-700">{DISCLAIMER}</p>
-        {stats.warnings.length > 0 && (
-          <ul className="mt-2 list-disc pl-5 text-xs text-amber-700">
-            {stats.warnings.map((w, i) => (
-              <li key={i}>{w}</li>
-            ))}
-          </ul>
-        )}
-      </div>
-
-      {/* SUMMARY */}
-      <Card>
-        <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm sm:grid-cols-4">
+        <dl className="mt-4 grid grid-cols-2 gap-x-4 gap-y-2 border-t border-slate-100 pt-3 text-sm sm:grid-cols-4">
           <Stat label="Predicted mask pixels" value={fmt(mo.predicted_mask_pixel_count)} small />
-          <Stat label="Predicted mask fraction" value={mo.predicted_mask_fraction.toExponential(2)} small />
           <Stat label="Predicted components" value={fmt(mo.predicted_component_count)} small />
           <Stat label="Max model probability" value={mo.max_model_probability.toFixed(4)} small />
           <Stat label="Hough segments" value={fmt(stats.hough.segment_count)} small />
+          <Stat label="Mask fraction" value={mo.predicted_mask_fraction.toExponential(2)} small />
           <Stat label="Processed shape" value={stats.image.processed_shape.join(" × ")} small />
           <Stat label="Patches" value={fmt(stats.image.n_patches)} small />
           <Stat
@@ -760,10 +747,10 @@ function OutputView(props: {
         </dl>
       </Card>
 
-      {/* COMPONENTS — always visible (no tab switching). */}
+      {/* PREDICTED COMPONENTS — main section below the images. */}
       <details className="glass rounded-2xl p-5" open>
         <summary className="cursor-pointer text-sm font-semibold text-slate-700">
-          Predicted components ({mo.predicted_component_count}) — click a row to highlight on the overlay
+          Predicted components ({mo.predicted_component_count}) – click a row to highlight on the overlay
         </summary>
         <div className="mt-3 overflow-x-auto">
           <table className="w-full text-left text-xs">
@@ -798,8 +785,8 @@ function OutputView(props: {
                   <td className="py-1 pr-3">{c.index}</td>
                   <td className="py-1 pr-3">{fmt(c.pixel_count)}</td>
                   <td className="py-1 pr-3">[{c.bbox.join(", ")}]</td>
-                  <td className="py-1 pr-3">{c.major_axis_px != null ? c.major_axis_px.toFixed(1) : "—"}</td>
-                  <td className="py-1 pr-3">{c.orientation_deg != null ? c.orientation_deg.toFixed(1) : "—"}</td>
+                  <td className="py-1 pr-3">{c.major_axis_px != null ? c.major_axis_px.toFixed(1) : "–"}</td>
+                  <td className="py-1 pr-3">{c.orientation_deg != null ? c.orientation_deg.toFixed(1) : "–"}</td>
                   <td className="py-1 pr-3">{c.mean_probability.toFixed(3)}</td>
                   <td className="py-1 pr-3">{c.max_probability.toFixed(3)}</td>
                 </tr>
@@ -810,114 +797,91 @@ function OutputView(props: {
             <p className="py-2 text-xs text-slate-500">No predicted components.</p>
           )}
           <p className="mt-2 text-[11px] text-slate-400">
-            &quot;Confidence&quot; is the model&apos;s probability within the component&apos;s pixels — a
+            &quot;Confidence&quot; is the model&apos;s probability within the component&apos;s pixels – a
             qualitative model output, not a likelihood that a real object is present.
           </p>
         </div>
       </details>
 
-      {/* Secondary detail kept in tabs. */}
-      <div role="tablist" aria-label="Result detail" className="flex gap-1 border-b border-slate-200/60">
-        {TABS.map((t, i) => (
-          <button
-            key={t}
-            id={`tab-${t}`}
-            role="tab"
-            aria-selected={tab === t}
-            aria-controls={`panel-${t}`}
-            tabIndex={tab === t ? 0 : -1}
-            onClick={() => setTab(t)}
-            onKeyDown={(e) => {
-              if (e.key === "ArrowRight" || e.key === "ArrowLeft") {
-                e.preventDefault();
-                const next = TABS[(i + (e.key === "ArrowRight" ? 1 : TABS.length - 1)) % TABS.length];
-                setTab(next);
-                document.getElementById(`tab-${next}`)?.focus();
-              }
-            }}
-            className={`px-3 py-2 text-sm font-medium transition ${
-              tab === t ? "border-b-2 border-blue-600 text-blue-700" : "text-slate-500 hover:text-slate-700"
-            }`}
-          >
-            {t}
-          </button>
-        ))}
-      </div>
-
-      {tab === "Provenance" && (
-        <section id="panel-Provenance" role="tabpanel" aria-labelledby="tab-Provenance">
-        <Card>
-          <div className="mb-3 flex items-center justify-between">
-            <h2 className="text-sm font-semibold text-slate-700">Provenance</h2>
-            <button
-              onClick={() => {
-                navigator.clipboard.writeText(JSON.stringify(stats.provenance, null, 2));
-                setCopied(true);
-                window.setTimeout(() => setCopied(false), 1500);
-              }}
-              aria-label="Copy provenance JSON to clipboard"
-              className="inline-flex items-center gap-1 rounded border border-slate-300 px-2 py-1 text-xs text-slate-600 hover:bg-slate-100"
-            >
-              <Copy className="h-3 w-3" aria-hidden="true" />
-              {copied ? "Copied" : "Copy"}
-            </button>
-          </div>
-          <dl className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-xs sm:grid-cols-3">
-            <Stat label="Format" value={stats.provenance.format} small />
-            <Stat label="HDU" value={stats.provenance.hdu ?? "—"} small />
-            <Stat label="Stretch" value={stats.provenance.stretch} small />
-            <Stat label="Stretch fallback" value={String(stats.provenance.stretch_fallback)} small />
-            <Stat label="Pixel-scale source" value={stats.provenance.pixel_scale_source} small />
-            <Stat
-              label="Pixel scale"
-              value={stats.provenance.pixel_scale_arcsec != null ? `${stats.provenance.pixel_scale_arcsec} "/px` : "—"}
-              small
-            />
-            <Stat label="Resample factor" value={stats.provenance.resample_factor.toFixed(4)} small />
-            <Stat label="Threshold" value={stats.provenance.threshold.toString()} small />
-            <Stat label="RGB→luminance" value={String(stats.provenance.rgb_to_luminance)} small />
-            <Stat label="Non-finite cleaned" value={fmt(stats.provenance.nonfinite_pixels_cleaned)} small />
-            <Stat label="Checkpoint SHA" value={`${stats.provenance.checkpoint_sha256.slice(0, 12)}…`} small />
-            <Stat label="Vendored commit" value={`${stats.provenance.vendored_source_commit.slice(0, 12)}…`} small />
-          </dl>
-        </Card>
-        </section>
-      )}
-
-      {tab === "Downloads" && (
-        <section id="panel-Downloads" role="tabpanel" aria-labelledby="tab-Downloads">
-        <Card>
-          <h2 className="mb-3 text-sm font-semibold text-slate-700">Downloads</h2>
-          <div className="flex flex-wrap gap-2">
-            {([
-              ["overlay.png", "Overlay"],
-              ["mask.png", "Mask"],
-              ["prob.png", "Confidence"],
-              ["input_8bit.png", "Model input"],
-              ["stats.json", "Stats JSON"],
-              ["bundle.zip", "All (.zip)"],
-            ] as const).map(([f, label]) => (
-              <a
-                key={f}
-                href={resultUrl(result_id, f)}
-                download
-                className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-100"
-              >
-                <Download className="h-3.5 w-3.5" aria-hidden="true" />
-                {label}
-              </a>
+      {/* Secondary detail – collapsed by default. */}
+      <details className="glass rounded-2xl p-5">
+        <summary className="cursor-pointer text-sm font-semibold text-blue-700">
+          Tier: {stats.tier.replace(/_/g, " ")}{" "}
+          <span className="cursor-help text-blue-400" title={TIER_DEFS}>
+            (what&apos;s this?)
+          </span>
+        </summary>
+        <p className="mt-2 text-sm text-slate-700">{TIER_TEXT[stats.tier]}</p>
+        <p className="mt-1 text-sm font-medium text-slate-700">{DISCLAIMER}</p>
+        {stats.warnings.length > 0 && (
+          <ul className="mt-2 list-disc pl-5 text-xs text-amber-700">
+            {stats.warnings.map((w, i) => (
+              <li key={i}>{w}</li>
             ))}
-          </div>
-        </Card>
-        </section>
-      )}
+          </ul>
+        )}
+      </details>
 
-      <button
-        onClick={onReset}
-        className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100"
-      >
-        Run another image
-      </button>
+      <details className="glass rounded-2xl p-5">
+        <summary className="flex cursor-pointer items-center justify-between text-sm font-semibold text-slate-700">
+          <span>Provenance</span>
+          <button
+            onClick={(e) => {
+              e.preventDefault();
+              navigator.clipboard.writeText(JSON.stringify(stats.provenance, null, 2));
+              setCopied(true);
+              window.setTimeout(() => setCopied(false), 1500);
+            }}
+            aria-label="Copy provenance JSON to clipboard"
+            className="inline-flex items-center gap-1 rounded border border-slate-300 px-2 py-1 text-xs font-normal text-slate-600 hover:bg-slate-100"
+          >
+            <Copy className="h-3 w-3" aria-hidden="true" />
+            {copied ? "Copied" : "Copy"}
+          </button>
+        </summary>
+        <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-1.5 text-xs sm:grid-cols-3">
+          <Stat label="Format" value={stats.provenance.format} small />
+          <Stat label="HDU" value={stats.provenance.hdu ?? "–"} small />
+          <Stat label="Stretch" value={stats.provenance.stretch} small />
+          <Stat label="Stretch fallback" value={String(stats.provenance.stretch_fallback)} small />
+          <Stat label="Pixel-scale source" value={stats.provenance.pixel_scale_source} small />
+          <Stat
+            label="Pixel scale"
+            value={stats.provenance.pixel_scale_arcsec != null ? `${stats.provenance.pixel_scale_arcsec} "/px` : "–"}
+            small
+          />
+          <Stat label="Resample factor" value={stats.provenance.resample_factor.toFixed(4)} small />
+          <Stat label="Threshold" value={stats.provenance.threshold.toString()} small />
+          <Stat label="RGB→luminance" value={String(stats.provenance.rgb_to_luminance)} small />
+          <Stat label="Non-finite cleaned" value={fmt(stats.provenance.nonfinite_pixels_cleaned)} small />
+          <Stat label="Checkpoint SHA" value={`${stats.provenance.checkpoint_sha256.slice(0, 12)}…`} small />
+          <Stat label="Vendored commit" value={`${stats.provenance.vendored_source_commit.slice(0, 12)}…`} small />
+        </dl>
+      </details>
+
+      <details className="glass rounded-2xl p-5">
+        <summary className="cursor-pointer text-sm font-semibold text-slate-700">Downloads</summary>
+        <div className="mt-3 flex flex-wrap gap-2">
+          {([
+            ["overlay.png", "Overlay"],
+            ["mask.png", "Mask"],
+            ["prob.png", "Confidence"],
+            ["input_8bit.png", "Model input"],
+            ["stats.json", "Stats JSON"],
+            ["bundle.zip", "All (.zip)"],
+          ] as const).map(([f, label]) => (
+            <a
+              key={f}
+              href={resultUrl(result_id, f)}
+              download
+              className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-100"
+            >
+              <Download className="h-3.5 w-3.5" aria-hidden="true" />
+              {label}
+            </a>
+          ))}
+        </div>
+      </details>
     </div>
   );
 }
@@ -925,21 +889,24 @@ function OutputView(props: {
 function Toggle({
   color,
   label,
+  tip,
   checked,
   onChange,
   disabled = false,
 }: {
   color: string;
   label: string;
+  tip?: string;
   checked: boolean;
   onChange: (b: boolean) => void;
   disabled?: boolean;
 }) {
   return (
-    <label className="flex items-center gap-2 text-sm text-slate-700">
+    <label className="flex items-center gap-1.5 text-sm text-slate-700">
       <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} disabled={disabled} />
       <span className="inline-block h-3 w-3 rounded-sm" style={{ background: color }} />
       {label}
+      {tip && <InfoTip text={tip} />}
     </label>
   );
 }
