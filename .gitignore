@@ -32,3 +32,6 @@ backend/outputs/
 # NOTE: the locked checkpoint (model-best.pth, public) IS tracked deliberately so the
 # image/demo is self-contained — do not add *.pth here.
 # NEVER add any MeerLICHT imagery; demo data is public DECam only.
+
+# Raw patch staging (process into frontend/public/demo, do not commit raw)
+/demo_patches/

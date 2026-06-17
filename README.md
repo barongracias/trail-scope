@@ -96,15 +96,23 @@ pip install -r backend/requirements.lock
 
 ## Demo data
 
-The repo ships only a small cropped 8-bit PNG derived from a public DECam frame
-(`frontend/public/demo/`). To fetch a full detector frame on demand:
+`frontend/public/demo/` ships a handful of small 8-bit example crops:
 
-```bash
-python scripts/download_demo_assets.py --expnum 1134933 --detector 5 --out-dir .demo_cache
-```
+- **DECam** (NAVSTAR-70, STARLINK-2600, DELTA-2 R/B) — derived from public NSF NOIRLab
+  frames. Fetch a full detector frame on demand with:
 
-This caches large FITS locally (gitignored, never committed). **No MeerLICHT imagery is
-distributed** — that is collaboration data and is out of scope here.
+  ```bash
+  python scripts/download_demo_assets.py --expnum 1134933 --detector 5 --out-dir .demo_cache
+  ```
+
+  (caches large FITS locally, gitignored.)
+- **MeerLICHT** example patches reproducing thesis Figures 5.4 (Hough bridging a U-Net gap)
+  and 5.5 (representative predictions), shown **with acknowledgement to the MeerLICHT
+  consortium**. These are display patches used for qualitative illustration only.
+
+> Acknowledgement: MeerLICHT is a wide-field optical telescope operated by a consortium led
+> by Radboud University, the University of Cape Town, and partners. Example patches are
+> reproduced from the thesis with thanks to the collaboration.
 
 > **Acknowledgement.** DECam demo frames are public products of the NSF NOIRLab Astro Data
 > Archive. Based on observations at Cerro Tololo Inter-American Observatory, NSF's NOIRLab,

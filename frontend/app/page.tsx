@@ -39,11 +39,12 @@ const TIER_DEFS =
 // Examples: text-only chips, image shown on hover. DECam = public NOIRLab; MeerLICHT
 // examples are reproduced from the public thesis figures (with acknowledgement).
 const DEMOS = [
-  { label: "NAVSTAR-70", file: "decam_navstar70_crop.png" },
-  { label: "STARLINK-2600", file: "decam_starlink2600_crop.png" },
-  { label: "DELTA-2 R/B", file: "decam_delta2_crop.png" },
-  { label: "Star field", file: "decam_starfield_crop.png" },
-  { label: "Hough gap (Fig 5.4)", file: "meerlicht_hough_gap_crop.png" },
+  { label: "NAVSTAR-70", file: "decam_navstar70.png" },
+  { label: "STARLINK-2600", file: "decam_starlink2600.png" },
+  { label: "ML1_20220629_hough_gap", file: "ml1_20220629_hough_gap.png" },
+  { label: "ML1_20220524_4224_5808", file: "ml1_20220524_4224_5808.png" },
+  { label: "ML1_20220629_2640_7392", file: "ml1_20220629_2640_7392.png" },
+  { label: "ML1_20220531_2112_2112", file: "ml1_20220531_2112_2112.png" },
 ];
 
 const TOGGLE_TIPS = {
@@ -314,9 +315,9 @@ export default function Page() {
         <footer className="mt-10 border-t border-slate-200/60 pt-4 text-xs text-slate-500">
           <p className="font-medium text-slate-600">{DISCLAIMER}</p>
           <p className="mt-1">
-            Demo data: public DECam frames (NSF&apos;s NOIRLab) and MeerLICHT examples reproduced
-            from the thesis with the consortium&apos;s acknowledgement. Stats use &quot;predicted
-            mask/component&quot; language and make no accuracy claims.
+            Demo data: public DECam frames (NSF&apos;s NOIRLab) and MeerLICHT example patches
+            (thesis Figs 5.4–5.5) shown with acknowledgement to the MeerLICHT consortium. Stats
+            use &quot;predicted mask/component&quot; language and make no accuracy claims.
           </p>
         </footer>
       )}
@@ -453,8 +454,8 @@ function InputView(props: {
             ))}
           </div>
           <p className="mt-2 text-[10px] text-slate-400">
-            DECam: public NSF&apos;s NOIRLab frames. MeerLICHT examples reproduced from the thesis
-            with thanks to the MeerLICHT consortium; no raw collaboration data is redistributed.
+            DECam: public NSF&apos;s NOIRLab frames. MeerLICHT example patches (thesis Figs 5.4–5.5)
+            shown with acknowledgement to the MeerLICHT consortium.
           </p>
         </div>
       </Card>

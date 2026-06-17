@@ -48,9 +48,8 @@ export default function AboutPanel() {
           >
             MPhil thesis repository
           </a>
-          . DECam demo frames are public NSF NOIRLab products. MeerLICHT example(s) are
-          reproduced from the thesis figures with thanks to the MeerLICHT consortium; no raw
-          collaboration data is redistributed.
+          . DECam demo frames are public NSF NOIRLab products. MeerLICHT example patches
+          (thesis Figs 5.4–5.5) are shown with acknowledgement to the MeerLICHT consortium.
         </p>
       </div>
     </details>

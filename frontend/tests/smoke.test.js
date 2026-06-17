@@ -34,7 +34,7 @@ test("no 'detection' wording anywhere in the UI (all app/*.tsx)", () => {
 
 test("the cropped DECam demo asset is shipped", () => {
   assert.ok(
-    fs.existsSync(path.join(root, "public", "demo", "decam_navstar70_crop.png")),
+    fs.existsSync(path.join(root, "public", "demo", "decam_navstar70.png")),
     "demo PNG must exist",
   );
 });
