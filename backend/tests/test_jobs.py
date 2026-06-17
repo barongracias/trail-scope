@@ -132,6 +132,9 @@ def test_cancel_running_job(client, monkeypatch):
             break
         time.sleep(0.1)
     assert client.get(f"/jobs/{job_id}/status").json()["state"] == "cancelled"
+    # A cancelled job must leave nothing fetchable, even if the render had finished.
+    for name in ("overlay.png", "mask.png", "stats.json", "bundle.zip"):
+        assert client.get(f"/results/{job_id}/{name}").status_code == 404
 
 
 def test_cancel_unknown_job_404(client):

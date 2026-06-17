@@ -54,13 +54,28 @@ class JobManager:
         try:
             d = config.RESULTS_DIR / job_id
             d.mkdir(parents=True, exist_ok=True)
-            (d / "status.json").write_text(json.dumps(st) + "\n")
+            # Atomic write (tmp + replace) so a concurrent reader never sees a partial file.
+            tmp = d / "status.json.tmp"
+            tmp.write_text(json.dumps(st) + "\n")
+            os.replace(tmp, d / "status.json")
             # Bump the DIR mtime (overwriting status.json does not) so the TTL sweep
             # keeps an active job's dir fresh; TTL then counts from the last write.
             os.utime(d, None)
         except OSError:  # pragma: no cover - defensive
             pass
         return st
+
+    def _remove_artifacts(self, job_id: str) -> None:
+        """Delete a job's rendered artifacts (everything but status.json)."""
+        d = config.RESULTS_DIR / job_id
+        if not d.exists():
+            return
+        for f in d.iterdir():
+            if f.name != "status.json":
+                try:
+                    f.unlink()
+                except OSError:  # pragma: no cover - defensive
+                    pass
 
     def submit(
         self,
@@ -110,8 +125,10 @@ class JobManager:
                 self._write(job_id, state="done", result_id=job_id, stats=stats,
                             n_patches=pre.n_patches)
         except asyncio.CancelledError:
-            # Cancellation is delivered at the next await boundary; the in-flight
-            # threadpool computation finishes in the background but its result is dropped.
+            # Cancellation is delivered at the next await boundary; the in-flight threadpool
+            # render may have already written artifacts, so delete them — a cancelled job
+            # must leave nothing fetchable (only status.json, reporting "cancelled").
+            self._remove_artifacts(job_id)
             self._write(job_id, state="cancelled", error="Cancelled by user")
             raise
         except PreprocessError as exc:

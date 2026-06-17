@@ -54,13 +54,17 @@ was copied at, the date, and (for `decam_cold_inference.py`) the exact function 
    tiling; U-Net; threshold **0.45**; optional Hough (`0.1/50/100/250/3`).
 6. Always emit `input_8bit.png` (what the model saw).
 
-## Demo data (public DECam only)
+## Demo data (public DECam + narrow MeerLICHT exception)
 
 - Manifest (read-only): `../bg492/results/classical/decam_cold_manifest.json` — nine
   predeclared NOIRLab DECam measured-streak frames (expnum/detector/object).
-- Per the spec: ship only small **cropped 8-bit PNG** examples in-repo, and/or a
+- Ship small **cropped 8-bit PNG** examples in-repo, and/or a
   `scripts/download_demo_assets.py` that fetches the full FITS from the NOIRLab archive on
-  demand (retrieval logic in `decam_cold_inference.py`). **Never** commit MeerLICHT data.
+  demand (retrieval logic in `decam_cold_inference.py`).
+- **MeerLICHT exception (2026-06-16, owner-authorised; consortium approval in progress):**
+  the small thesis Fig. 5.4/5.5 MeerLICHT display-PNG patches (`frontend/public/demo/
+  ml1_*.png`) may be shipped with a MeerLICHT acknowledgement. Do **not** commit any other
+  MeerLICHT data (raw/full-frame imagery, GT masks, `data/patches` content).
 - Raw DECam linear FITS are downsampled before stretch by `0.470357…` (area-averaging,
   not flux-preserving); one fixed ZScale stretch for display.
 

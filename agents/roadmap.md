@@ -11,7 +11,9 @@ sequenced enhancements to pick up after the v1 build (P1–P4, complete 2026-06-
   threshold tuning for uploads. "predicted mask/component" vocabulary, never
   "trail"/"detection". Disclaimer + neutral tier stay on input page, output page, README,
   `/model`, `stats.json`.
-- Data policy: public DECam only; never MeerLICHT.
+- Data policy: public DECam, plus the narrow approved MeerLICHT exception (the small thesis
+  Fig. 5.4/5.5 display-PNG patches with acknowledgement; no other MeerLICHT data). See
+  CLAUDE.md rule 5.
 
 Effort key: **S** ≤½ day · **M** ~1 day · **L** multi-day. ⟐ = already a spec v2 candidate.
 

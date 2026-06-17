@@ -32,7 +32,7 @@ DISCLAIMER = (
 )
 
 TRAINING_DOMAIN = "MeerLICHT 8-bit display PNG patches"
-THESIS_REPO_LINK = "https://github.com/barongracias/bg492"
+THESIS_REPO_LINK = "https://github.com/barongracias/satellite_trail_detection"
 
 # --------------------------------------------------------------------------------------
 # Locked invariants (constants, never API parameters)

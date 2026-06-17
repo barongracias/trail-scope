@@ -30,9 +30,13 @@ constants) are in **`agents/build_context.md`**. Record progress in
    on mismatch), threshold `0.45`, normalisation `full_image`, Hough
    `0.1/50/100/250/3` (incl. `line_thickness=3`), `PATCH_SIZE=528`. User-facing knobs
    are ONLY: Hough on/off, optional pixel-scale override, optional FITS HDU index.
-5. **Data policy.** Never ship, commit, or redistribute MeerLICHT imagery (it is
-   collaboration data in `../bg492`). Demo data is the **public DECam frames only**
-   (`build_context.md`). Include the NOIRLab acknowledgement where DECam data appears.
+5. **Data policy.** Demo data is the **public DECam frames** (`build_context.md`); include
+   the NOIRLab acknowledgement where DECam data appears. **Narrow approved exception
+   (owner-authorised; MeerLICHT consortium approval in progress):** the repo may also ship
+   the small thesis Fig. 5.4/5.5 MeerLICHT **display-PNG patches** in `frontend/public/demo/`
+   (`ml1_*.png`), shown with a MeerLICHT acknowledgement on every surface they appear. **No
+   other MeerLICHT data** — no raw/full-frame imagery, no ground-truth masks, no
+   `data/patches` content beyond those acknowledged example patches.
 6. **Honesty / scope.** Qualitative inference only; no precision/recall/accuracy or
    benchmark claims for uploaded images. The disclaimer and neutral tier
    (`in_domain_like` / `recipe_matched` / `best_effort`) must appear on the input

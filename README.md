@@ -98,8 +98,8 @@ pip install -r backend/requirements.lock
 
 `frontend/public/demo/` ships a handful of small 8-bit example crops:
 
-- **DECam** (NAVSTAR-70, STARLINK-2600, DELTA-2 R/B) — derived from public NSF NOIRLab
-  frames. Fetch a full detector frame on demand with:
+- **DECam** (NAVSTAR-70, STARLINK-2600) — derived from public NSF NOIRLab frames. Fetch a
+  full detector frame on demand with:
 
   ```bash
   python scripts/download_demo_assets.py --expnum 1134933 --detector 5 --out-dir .demo_cache

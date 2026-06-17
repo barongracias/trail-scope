@@ -239,7 +239,9 @@ def _dir_has_active_job(d: Path) -> bool:
         state = json.loads(status_file.read_text()).get("state")
         return state is not None and state not in TERMINAL_JOB_STATES
     except (OSError, json.JSONDecodeError):  # pragma: no cover - defensive
-        return False
+        # Present but unreadable (e.g. a torn read) → treat conservatively as active so the
+        # TTL sweep never deletes a job dir mid-write.
+        return True
 
 
 def _cleanup_old_results() -> None:
@@ -481,6 +483,18 @@ async def get_result(result_id: str, filename: str):
     if not _RESULT_ID_RE.match(result_id):
         raise error_response(404, "Unknown result id")
     result_dir = config.RESULTS_DIR / result_id
+
+    # If this is an async-job dir, only serve artifacts once the job is DONE — never from a
+    # cancelled / errored / in-flight job (whose artifacts may be partial or were dropped).
+    # Synchronous /infer results have no status.json and serve normally.
+    status_file = result_dir / "status.json"
+    if status_file.exists():
+        try:
+            state = json.loads(status_file.read_text()).get("state")
+        except (OSError, json.JSONDecodeError):
+            state = None
+        if state != "done":
+            raise error_response(404, "Result not available")
 
     if filename == "bundle.zip":
         if not result_dir.is_dir():

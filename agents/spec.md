@@ -176,7 +176,11 @@ README, `/model`, `stats.json`.
 - `scripts/download_demo_assets.py` fetches the full detector FITS from the
   NOIRLab archive on demand (reuse the retrieval logic from
   `decam_cold_inference.py`); optionally cache processed demo outputs.
-- **Never any MeerLICHT imagery** (collaboration data policy).
+- **MeerLICHT: narrow approved exception only.** Originally "never any MeerLICHT imagery".
+  Updated 2026-06-16 (owner-authorised; consortium approval in progress): the demo may also
+  ship the small thesis Fig. 5.4/5.5 MeerLICHT display-PNG patches (`frontend/public/demo/
+  ml1_*.png`) with a MeerLICHT acknowledgement everywhere they appear. No raw/full-frame
+  MeerLICHT, no GT masks, nothing beyond those acknowledged example patches.
 
 ## Build/dependencies
 
